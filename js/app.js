@@ -102,7 +102,7 @@ function renderRoster(){
       h("div", {class:"info", onclick: () => { if(!dead) enterGame(ch); }},
         h("div", {class:"nm"}, ch.name || "Unnamed"),
         h("div", {class:"meta"}, `Level ${ch.level} ${ch.race} ${ch.class} · ${ch.xp} XP`),
-        dead ? h("div", {class:"dead"}, "☠ Fell in the dark") :
+        dead ? h("div", {class:"dead"}, "Fell in the dark") :
           run && run.status === "active" ? h("div", {class:"meta"}, `In the dungeon — floor ${run.floor}, room ${run.roomIndex}`) :
           h("div", {class:"meta"}, "At the surface")),
       !dead && run && run.status === "active"
@@ -152,21 +152,7 @@ function settingsCard(){
         prefs.light = document.body.classList.contains("light");
         setJSON("prefs", { ...getJSON("prefs", {}), light: prefs.light });
       }}, icon("moon", 16), "Theme")),
-    h("button", {class:"btn small", id:"audio-test", onclick: () => {
-      initAudio();
-      sfx("treasure");
-      setTimeout(() => {
-        const d = audioDebug();
-        const el = $("audio-test-note");
-        if(el) el.textContent = `Audio: ${d.context} · sounds played: ${d.soundsPlayed} · unlock loop: ${d.silentUnlock} · music: ${d.music}. ` +
-          (d.context === "running" && d.soundsPlayed > 0
-            ? "The engine is playing — if you hear nothing, check the ring/silent switch, volume buttons, and Bluetooth output."
-            : "Not unlocked yet — tap this button again.");
-      }, 350);
-    }}, icon("volume", 16), "Test sound"),
-    h("p", {class:"muted", id:"audio-test-note"}, ""),
-    h("p", {class:"muted"}, `v${VERSION} · offline-ready · your heroes live in this device's browser storage`),
-    h("p", {class:"muted", style:"font-size:12px"}, `Music: "Master of the Feast", "Ossuary 5 - Rest", "Crossing the Chasm", "Five Armies" — Kevin MacLeod (incompetech.com), CC BY 4.0`));
+    h("p", {class:"muted"}, `v${VERSION} · offline-ready · your heroes live in this device's browser storage`));
 }
 
 function onCharacterBuilt(ch){

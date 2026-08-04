@@ -23,6 +23,11 @@ body{
   overscroll-behavior:none; -webkit-font-smoothing:antialiased;
   padding-top:env(safe-area-inset-top);
 }
+/* Installed on iOS the page extends under the status bar / Dynamic Island; guarantee clearance
+   even when env() misreports by enforcing a minimum inset in standalone mode. */
+@media (display-mode: standalone){
+  body{ padding-top:max(env(safe-area-inset-top), 54px); }
+}
 button{ font-family:inherit; }
 h1,h2,h3{ font-family:var(--serif); letter-spacing:.02em; }
 
@@ -86,7 +91,7 @@ h1,h2,h3{ font-family:var(--serif); letter-spacing:.02em; }
 .btn.danger{ background:transparent; color:var(--bad); border-color:var(--bad); box-shadow:none; }
 .btn.small{ display:inline-flex; width:auto; padding:8px 14px; font-size:14px; margin:4px 4px 4px 0; }
 .btn:disabled{ opacity:.4; pointer-events:none; }
-.btnrow{ display:flex; gap:8px; } .btnrow .btn{ flex:1; }
+.btnrow{ display:flex; gap:8px; flex-wrap:wrap; } .btnrow .btn{ flex:1 1 auto; min-width:0; }
 .btn .ic{ opacity:.85; }
 
 /* ---- bottom action bar (thumb zone) ---- */

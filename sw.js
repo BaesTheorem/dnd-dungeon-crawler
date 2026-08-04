@@ -6,7 +6,7 @@
      served cache-first — a version-coherent set of ES modules, no old-module/new-shell skew offline.
    - activate deletes every cache except the current one.
    CACHE is stamped by .githooks/pre-commit on every commit. */
-const CACHE = "dnd-crawler-v1.0.8";
+const CACHE = "dnd-crawler-v1.0.9";
 const DOC = "./index.html";
 const ASSETS = [
   "./",
@@ -22,7 +22,11 @@ const ASSETS = [
 ];
 
 self.addEventListener("install", e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  // cache:"reload" bypasses the HTTP cache — without it, addAll can precache STALE modules
+  // (GitHub Pages serves max-age=600) under a fresh cache name, shipping a mixed build.
+  e.waitUntil(caches.open(CACHE)
+    .then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: "reload" }))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", e => e.waitUntil(
