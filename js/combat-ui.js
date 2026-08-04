@@ -8,6 +8,7 @@ import { spellMechanics } from "../data/data.js";
 import { sfx, startMusic } from "./audio.js";
 import { queueSave } from "./state.js";
 import { fmtMod } from "./rules.js";
+import { icon } from "./icons.js";
 
 let st = null, ch = null, floor = 1, onEnd = null;
 let targetIdx = 0;
@@ -87,18 +88,18 @@ function renderBar(){
   if(!st) return;
   if(st.phase === "dying"){
     bar.append(h("button", {class:"btn danger", onclick: () => act(() => CB.deathSave(st, ch))},
-      `☠ Roll death save (${ch.deathSaves.s}✓ ${ch.deathSaves.f}✗)`));
+      icon("skull"), `Roll death save (${ch.deathSaves.s} saved · ${ch.deathSaves.f} failed)`));
     return;
   }
   if(st.pendingReaction){
     const pr = st.pendingReaction;
     const m = st.monsters[pr.mi];
-    bar.append(h("p", {class:"center", style:"margin:2px 0 6px;font-weight:700"},
-      `⚡ ${m.name}'s ${pr.atk.name} hits (${pr.res.total} vs AC ${pr.ac})${pr.crit ? " — CRIT!" : ""} React?`));
+    bar.append(h("p", {class:"center reactline"},
+      `Reaction — ${m.name}'s ${pr.atk.name} hits (${pr.res.total} vs AC ${pr.ac})${pr.crit ? ", a critical" : ""}!`));
     if(pr.options.includes("shield"))
-      bar.append(h("button", {class:"btn primary", onclick: () => act(() => CB.reactionChoose(st, ch, "shield"))}, "🛡 Shield — +5 AC, turns it into a miss (L1 slot)"));
+      bar.append(h("button", {class:"btn primary", onclick: () => act(() => CB.reactionChoose(st, ch, "shield"))}, icon("shield"), "Shield — +5 AC, turns it into a miss (L1 slot)"));
     if(pr.options.includes("barbs"))
-      bar.append(h("button", {class:"btn primary", onclick: () => act(() => CB.reactionChoose(st, ch, "barbs"))}, "✨ Silvery Barbs — force a reroll (L1 slot)"));
+      bar.append(h("button", {class:"btn primary", onclick: () => act(() => CB.reactionChoose(st, ch, "barbs"))}, icon("sparkle"), "Silvery Barbs — force a reroll (L1 slot)"));
     bar.append(h("button", {class:"btn", onclick: () => act(() => CB.reactionChoose(st, ch, "decline"))}, "Take the hit"));
     return;
   }
@@ -145,19 +146,19 @@ function renderBar(){
   const noAction = st.actionsLeft <= 0 && st.attacksLeft <= 0;
   grid.append(h("button", {class:"btn primary", disabled: noAction ? "" : null,
     onclick: () => { if(ch.equipment.weapons.length === 1) act(() => CB.playerAttack(st, ch, ch.equipment.weapons[0], targetIdx)); else { submenu = "attack"; render(); } }},
-    st.attacksLeft > 0 ? `⚔ Attack (${st.attacksLeft} left)` : "⚔ Attack"));
-  if(ch.spells.known.length) grid.append(h("button", {class:"btn primary", disabled: st.actionsLeft <= 0 ? "" : null, onclick: () => { submenu = "cast"; render(); }}, "✨ Cast"));
-  grid.append(h("button", {class:"btn", disabled: st.actionsLeft <= 0 ? "" : null, onclick: () => act(() => CB.playerDodge(st, ch))}, "🛡 Dodge"));
-  grid.append(h("button", {class:"btn", disabled: st.bonusUsed ? "" : null, onclick: () => { submenu = "item"; render(); }}, "🧪 Potion"));
+    icon("swords"), st.attacksLeft > 0 ? `Attack (${st.attacksLeft} left)` : "Attack"));
+  if(ch.spells.known.length) grid.append(h("button", {class:"btn primary", disabled: st.actionsLeft <= 0 ? "" : null, onclick: () => { submenu = "cast"; render(); }}, icon("sparkle"), "Cast"));
+  grid.append(h("button", {class:"btn", disabled: st.actionsLeft <= 0 ? "" : null, onclick: () => act(() => CB.playerDodge(st, ch))}, icon("shield"), "Dodge"));
+  grid.append(h("button", {class:"btn", disabled: st.bonusUsed ? "" : null, onclick: () => { submenu = "item"; render(); }}, icon("flask"), "Potion"));
   if(ch.resources.secondWind?.cur > 0)
-    grid.append(h("button", {class:"btn", disabled: st.bonusUsed ? "" : null, onclick: () => act(() => CB.playerSecondWind(st, ch))}, "💨 Second Wind"));
+    grid.append(h("button", {class:"btn", disabled: st.bonusUsed ? "" : null, onclick: () => act(() => CB.playerSecondWind(st, ch))}, icon("wind"), "Second Wind"));
   if(ch.resources.actionSurge?.cur > 0)
-    grid.append(h("button", {class:"btn", onclick: () => act(() => CB.playerActionSurge(st, ch))}, "⚡ Action Surge"));
+    grid.append(h("button", {class:"btn", onclick: () => act(() => CB.playerActionSurge(st, ch))}, icon("bolt"), "Action Surge"));
   if(ch.resources.channelDivinity?.cur > 0)
-    grid.append(h("button", {class:"btn", disabled: st.actionsLeft <= 0 ? "" : null, onclick: () => act(() => CB.playerChannelDivinity(st, ch))}, "🙏 Channel Divinity"));
-  grid.append(h("button", {class:"btn", disabled: st.actionsLeft <= 0 ? "" : null, onclick: () => act(() => CB.playerFlee(st, ch, floor))}, "🏃 Flee"));
+    grid.append(h("button", {class:"btn", disabled: st.actionsLeft <= 0 ? "" : null, onclick: () => act(() => CB.playerChannelDivinity(st, ch))}, icon("sun"), "Channel Divinity"));
+  grid.append(h("button", {class:"btn", disabled: st.actionsLeft <= 0 ? "" : null, onclick: () => act(() => CB.playerFlee(st, ch, floor))}, icon("run"), "Flee"));
   bar.append(grid);
-  bar.append(h("button", {class:"btn", onclick: () => act(() => CB.endPlayerTurn(st, ch))}, "⏭ End turn"));
+  bar.append(h("button", {class:"btn", onclick: () => act(() => CB.endPlayerTurn(st, ch))}, icon("next"), "End turn"));
 }
 
 function act(fn){

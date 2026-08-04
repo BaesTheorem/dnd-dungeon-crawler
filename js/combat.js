@@ -478,7 +478,7 @@ export function reactionChoose(st, ch, choice){
       ch.spells.slots[sl].cur -= 1;
       st.reactionUsed = true;
       st.playerBuffs.push({ buff:"acBonus", amount:5, until:"turnStart", label:"Shield (+5 AC)" });
-      st.events.push({t:"sfx", name:"spell"}, {t:"log", text:`⚡ Reaction — Shield! Your AC leaps to ${pr.ac + 5} until your next turn.`});
+      st.events.push({t:"sfx", name:"spell"}, {t:"log", text:`Reaction — Shield! Your AC leaps to ${pr.ac + 5} until your next turn.`});
       const newAC = C.armorClass(ch, st.playerBuffs);
       if(!pr.crit && pr.res.total < newAC){
         st.events.push({t:"sfx", name:"monster-miss"}, {t:"log", text:`${m.name}'s ${pr.atk.name} glances off the shimmering barrier!`});
@@ -499,7 +499,7 @@ export function reactionChoose(st, ch, choice){
       const kept = Math.min(orig, r2);
       const total = kept + (pr.res.mod || 0);
       st.events.push({t:"sfx", name:"spell"},
-        {t:"log", text:`⚡ Reaction — Silvery Barbs! ${m.name} rerolls: ${orig} → ${r2}, keeps ${kept}.`});
+        {t:"log", text:`Reaction — Silvery Barbs! ${m.name} rerolls: ${orig} → ${r2}, keeps ${kept}.`});
       const crit = kept === 20;
       const hit = kept !== 1 && (crit || total >= pr.ac);
       if(!hit){

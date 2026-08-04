@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Dungeon Crawler">
-<meta name="app-version" content="1.0.2">
+<meta name="app-version" content="1.0.3">
 <title>Dungeon Crawler — D&D 5e</title>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icon-180.png">
@@ -19,7 +19,10 @@
 <!-- Loading -->
 <section id="screen-loading" class="screen active">
   <div class="screen-scroll no-bar center" style="display:flex;flex-direction:column;justify-content:center">
-    <h1 class="title-hero">⚔ Dungeon Crawler</h1>
+    <div class="loading-die" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="56" height="56" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l9 5v10l-9 5-9-5V7z"/><path d="M12 8.5L7 16h10z"/><path d="M12 2v6.5M3 7l4 9M21 7l-4 9M3 17l4-1M21 17l-4-1M12 22v-6"/></svg>
+    </div>
+    <h1 class="title-hero">Dungeon Crawler</h1>
     <p class="subtitle">A D&amp;D 5e roguelike descent</p>
     <div class="progress"><div class="fill" id="loading-fill"></div></div>
     <p class="muted center" id="loading-note">Lighting the torches…</p>
@@ -63,7 +66,7 @@
       <button data-tab="skills">Skills</button>
       <button data-tab="gear">Gear</button>
       <button data-tab="spells">Spells</button>
-      <button id="sheet-close" style="flex:0 0 44px">✕</button>
+      <button id="sheet-close" style="flex:0 0 44px" aria-label="Close">×</button>
     </div>
     <div class="body" id="sheet-body"></div>
   </div>

@@ -15,6 +15,7 @@ import { initAudio, loadAudioPrefs, audioPrefs, setAudioPref, sfx, startMusic, s
 import { getJSON, setJSON } from "./storage.js";
 import { FLOORS, ROOMS_PER_FLOOR } from "../data/tables.js";
 import { classSpellList } from "../data/data.js";
+import { icon, bigIcon } from "./icons.js";
 
 const VERSION = document.querySelector('meta[name="app-version"]')?.content || "dev";
 
@@ -74,8 +75,10 @@ function renderRoster(){
   stopMusicIfCombat();
   const body = clear($("roster-body"));
   body.append(
-    h("h1", {class:"title-hero"}, "⚔ Dungeon Crawler"),
-    h("p", {class:"subtitle"}, "A D&D 5e roguelike descent"));
+    h("div", {class:"center", style:"margin-top:28px;color:var(--accent)"}, bigIcon("d20", 44)),
+    h("h1", {class:"title-hero"}, "Dungeon Crawler"),
+    h("p", {class:"subtitle"}, "A D&D 5e roguelike descent"),
+    h("div", {class:"ornament"}));
   if(!S.chars.length){
     body.append(h("div", {class:"card center"},
       h("p", {}, "No heroes yet. Forge one and descend."),
@@ -92,10 +95,10 @@ function renderRoster(){
           run && run.status === "active" ? h("div", {class:"meta"}, `In the dungeon — floor ${run.floor}, room ${run.roomIndex}`) :
           h("div", {class:"meta"}, "At the surface")),
       dead
-        ? h("button", {class:"iconbtn", onclick: () => { if(confirmDialog(`Lay ${ch.name} to rest (delete)?`)){ deleteCharacter(ch.id); renderRoster(); } }}, "🪦")
-        : h("button", {class:"iconbtn", onclick: () => { if(confirmDialog(`Delete ${ch.name}? This cannot be undone.`)){ deleteCharacter(ch.id); renderRoster(); } }}, "✕")));
+        ? h("button", {class:"iconbtn", onclick: () => { if(confirmDialog(`Lay ${ch.name} to rest (delete)?`)){ deleteCharacter(ch.id); renderRoster(); } }}, icon("grave", 16))
+        : h("button", {class:"iconbtn", onclick: () => { if(confirmDialog(`Delete ${ch.name}? This cannot be undone.`)){ deleteCharacter(ch.id); renderRoster(); } }}, icon("x", 16))));
   });
-  body.append(h("button", {class:"btn primary", onclick: () => startBuilder(onCharacterBuilt)}, "＋ New hero"));
+  body.append(h("button", {class:"btn primary", onclick: () => startBuilder(onCharacterBuilt)}, icon("plus"), "New hero"));
   body.append(settingsCard());
   showBar("");
 }
@@ -106,13 +109,13 @@ function settingsCard(){
   return h("div", {class:"card"},
     h("h2", {}, "Settings"),
     h("div", {class:"btnrow"},
-      h("button", {class:"btn small" + (p.sfx ? " primary" : ""), onclick: e => { setAudioPref("sfx", !audioPrefs().sfx); renderRoster(); }}, p.sfx ? "🔊 SFX on" : "🔇 SFX off"),
-      h("button", {class:"btn small" + (p.music ? " primary" : ""), onclick: e => { setAudioPref("music", !audioPrefs().music); if(audioPrefs().music) startMusic("town"); else stopMusic(); renderRoster(); }}, p.music ? "🎵 Music on" : "🎵 Music off"),
+      h("button", {class:"btn small" + (p.sfx ? " primary" : ""), onclick: e => { setAudioPref("sfx", !audioPrefs().sfx); renderRoster(); }}, icon(p.sfx ? "volume" : "volumeOff", 16), p.sfx ? "Sound on" : "Sound off"),
+      h("button", {class:"btn small" + (p.music ? " primary" : ""), onclick: e => { setAudioPref("music", !audioPrefs().music); if(audioPrefs().music) startMusic("town"); else stopMusic(); renderRoster(); }}, icon("music", 16), p.music ? "Music on" : "Music off"),
       h("button", {class:"btn small", onclick: () => {
         document.body.classList.toggle("light");
         prefs.light = document.body.classList.contains("light");
         setJSON("prefs", { ...getJSON("prefs", {}), light: prefs.light });
-      }}, "☀/🌙 Theme")),
+      }}, icon("moon", 16), "Theme")),
     h("p", {class:"muted"}, `v${VERSION} · offline-ready · your heroes live in this device's browser storage`));
 }
 
@@ -164,7 +167,7 @@ function renderCorridor(){
   if(levelForXP(ch.xp) > ch.level){ renderLevelUp(area); return; }
   const nextIsLast = run.roomIndex + 1 >= ROOMS_PER_FLOOR;
   area.append(h("div", {class:"card center"},
-    h("div", {class:"bigicon"}, "🕯"),
+    h("div", {class:"bigicon"}, bigIcon("candle")),
     h("p", {class:"flavor"}, run.roomIndex === 0
       ? (run.floor === 1 ? "Torch in hand, you stand at the dungeon mouth. The dark swallows the stairs below." : `Floor ${run.floor}. The air is colder here.`)
       : "The corridor stretches on, quiet for now."),
@@ -176,11 +179,12 @@ function renderCorridor(){
   const mainBar = () => {
     clear(bar);
     bar.append(h("button", {class:"btn primary", onclick: () => { sfx("door"); D.nextRoom(S.run, ch); queueSave(); renderRoom(); }},
-      nextIsLast ? (run.floor >= FLOORS ? "⚔ Enter the boss lair" : "🚪 Approach the stairs") : "🚪 Open the next door"));
+      icon(nextIsLast ? (run.floor >= FLOORS ? "crown" : "stairs") : "door"),
+      nextIsLast ? (run.floor >= FLOORS ? "Enter the boss lair" : "Approach the stairs") : "Open the next door"));
     const castable = D.castableOutOfCombat(ch);
-    if(castable.length) bar.append(h("button", {class:"btn", onclick: castBar}, "✨ Cast a spell"));
-    bar.append(h("button", {class:"btn", onclick: () => openSheet(ch)}, "📜 Character sheet"));
-    bar.append(h("button", {class:"btn", onclick: () => { saveNow(); renderRoster(); showScreen("screen-roster"); }}, "⬆ Retreat to the surface"));
+    if(castable.length) bar.append(h("button", {class:"btn", onclick: castBar}, icon("sparkle"), "Cast a spell"));
+    bar.append(h("button", {class:"btn", onclick: () => openSheet(ch)}, icon("scroll"), "Character sheet"));
+    bar.append(h("button", {class:"btn", onclick: () => { saveNow(); renderRoster(); showScreen("screen-roster"); }}, icon("arrowUp"), "Retreat to the surface"));
   };
   const castBar = () => {
     clear(bar);
@@ -221,7 +225,7 @@ function renderRoom(){
 
   if(room.type === "combat" || room.type === "stairs" || room.type === "boss"){
     area.append(h("div", {class:"card center"},
-      h("div", {class:"bigicon"}, room.type === "boss" ? "🐉" : "⚔"),
+      h("div", {class:"bigicon"}, bigIcon(room.type === "boss" ? "crown" : "swords")),
       h("p", {class:"flavor"}, room.flavor),
       h("p", {}, room.monsters.map(m => m.name).join(", ") + " — " + (room.monsters[0].flavor || ""))));
     area.append(statusStrip());
@@ -230,8 +234,8 @@ function renderRoom(){
       if(run.pendingBless){ st.playerBuffs.push({buff:"bless", label:"Blessed (shrine)", conc:false}); run.pendingBless = false; }
       queueSave();
       startCombatUI(st, ch, run.floor, onCombatEnd);
-    }}, "⚔ Fight!"));
-    bar.append(h("button", {class:"btn", onclick: () => openSheet(ch)}, "📜 Sheet"));
+    }}, icon("swords"), "Fight"));
+    bar.append(h("button", {class:"btn", onclick: () => openSheet(ch)}, icon("scroll"), "Sheet"));
     return;
   }
   if(room.type === "trap"){ renderTrapRoom(area, bar, log); return; }
@@ -255,16 +259,16 @@ function afterRoomResolved(){
   renderCorridor();
 }
 
-function contBar(bar, label = "➜ Press on"){
+function contBar(bar, label = "Press on"){
   clear(bar);
-  bar.append(h("button", {class:"btn primary", onclick: afterRoomResolved}, label));
-  bar.append(h("button", {class:"btn", onclick: () => openSheet(S.current)}, "📜 Sheet"));
+  bar.append(h("button", {class:"btn primary", onclick: afterRoomResolved}, icon("arrowRight"), label));
+  bar.append(h("button", {class:"btn", onclick: () => openSheet(S.current)}, icon("scroll"), "Sheet"));
 }
 
 function renderTrapRoom(area, bar, log){
   const ch = S.current, run = S.run, room = run.room, trap = room.trap;
   area.append(h("div", {class:"card center"},
-    h("div", {class:"bigicon"}, "☠"),
+    h("div", {class:"bigicon"}, bigIcon("skull")),
     h("p", {class:"flavor"}, trap.text),
     room.detected ? h("p", {}, h("span", {class:"badge"}, `You sense danger: ${trap.name}`)) :
       h("p", {class:"muted"}, "Something feels wrong about this room…")));
@@ -285,13 +289,13 @@ function renderTrapRoom(area, bar, log){
   const renderTrapBar = () => {
     clear(bar);
     if(room.trapState === "detected"){
-      bar.append(h("button", {class:"btn primary", onclick: () => act("disarm")}, `🔧 Disarm (${trap.disarmSkill})`));
-      bar.append(h("button", {class:"btn", onclick: () => act("careful")}, "🐾 Edge past carefully"));
+      bar.append(h("button", {class:"btn primary", onclick: () => act("disarm")}, icon("gear"), `Disarm (${trap.disarmSkill})`));
+      bar.append(h("button", {class:"btn", onclick: () => act("careful")}, icon("foot"), "Edge past carefully"));
     } else if(room.trapState === "unfound"){
-      bar.append(h("button", {class:"btn primary", onclick: () => act("barge")}, "🚶 Chance it"));
+      bar.append(h("button", {class:"btn primary", onclick: () => act("barge")}, icon("foot"), "Chance it"));
     } else {
-      bar.append(h("button", {class:"btn primary", onclick: () => act("search")}, "🔍 Search the room"));
-      bar.append(h("button", {class:"btn", onclick: () => act("barge")}, "🚶 Stride through"));
+      bar.append(h("button", {class:"btn primary", onclick: () => act("search")}, icon("eye"), "Search the room"));
+      bar.append(h("button", {class:"btn", onclick: () => act("barge")}, icon("foot"), "Stride through"));
     }
   };
   renderTrapBar();
@@ -300,7 +304,7 @@ function renderTrapRoom(area, bar, log){
 function renderTreasureRoom(area, bar, log){
   const ch = S.current, run = S.run, room = run.room;
   area.append(h("div", {class:"card center"},
-    h("div", {class:"bigicon"}, "🧰"),
+    h("div", {class:"bigicon"}, bigIcon("chest")),
     h("p", {class:"flavor"}, room.flavor)));
   area.append(statusStrip());
   area.append(h("div", {class:"log"}, log));
@@ -312,15 +316,15 @@ function renderTreasureRoom(area, bar, log){
     queueSave();
     if(run.status === "dead"){ setTimeout(renderDeath, 900); return; }
     if(room.resolved) contBar(bar);
-    else bar.querySelector("button").textContent = "🧰 Open the chest (again)";
-  }}, "🧰 Open the chest"));
-  bar.append(h("button", {class:"btn", onclick: () => { room.resolved = true; afterRoomResolved(); }}, "🚪 Leave it — press on"));
+    else bar.querySelector("button").append(" (again)");
+  }}, icon("chest"), "Open the chest"));
+  bar.append(h("button", {class:"btn", onclick: () => { room.resolved = true; afterRoomResolved(); }}, icon("arrowRight"), "Leave it — press on"));
 }
 
 function renderRestRoom(area, bar, log){
   const ch = S.current, run = S.run, room = run.room;
   area.append(h("div", {class:"card center"},
-    h("div", {class:"bigicon"}, "🔥"),
+    h("div", {class:"bigicon"}, bigIcon("fire")),
     h("p", {class:"flavor"}, room.flavor),
     h("p", {class:"muted"}, `Hit dice: ${ch.hp.hitDiceCur}/${ch.hp.hitDiceMax} · Long rest ${run.longRestUsedThisFloor ? "already taken this floor" : "available (1/floor)"}`)));
   area.append(statusStrip());
@@ -342,10 +346,10 @@ function renderRestRoom(area, bar, log){
   clear(bar);
   const spend = Math.min(2, ch.hp.hitDiceCur) || 1;
   bar.append(h("button", {class:"btn primary", disabled: ch.hp.hitDiceCur <= 0 ? "" : null,
-    onclick: () => doRest(() => D.shortRest(run, ch, spend))}, `🔥 Short rest (spend ${spend} Hit ${spend === 1 ? "Die" : "Dice"})`));
+    onclick: () => doRest(() => D.shortRest(run, ch, spend))}, icon("fire"), `Short rest (spend ${spend} Hit ${spend === 1 ? "Die" : "Dice"})`));
   bar.append(h("button", {class:"btn", disabled: run.longRestUsedThisFloor ? "" : null,
-    onclick: () => doRest(() => D.longRestHere(run, ch))}, "🛌 Long rest (full recovery)"));
-  bar.append(h("button", {class:"btn", onclick: () => { room.resolved = true; afterRoomResolved(); }}, "🚪 Keep moving"));
+    onclick: () => doRest(() => D.longRestHere(run, ch))}, icon("bed"), "Long rest (full recovery)"));
+  bar.append(h("button", {class:"btn", onclick: () => { room.resolved = true; afterRoomResolved(); }}, icon("arrowRight"), "Keep moving"));
 }
 
 function ambushCombat(run, ch){
@@ -359,7 +363,7 @@ function ambushCombat(run, ch){
 function renderEventRoom(area, bar, log){
   const ch = S.current, run = S.run, room = run.room, ev = room.event;
   area.append(h("div", {class:"card center"},
-    h("div", {class:"bigicon"}, "🕸"),
+    h("div", {class:"bigicon"}, bigIcon("web")),
     h("h2", {}, ev.name),
     h("p", {class:"flavor"}, ev.text)));
   area.append(statusStrip());
@@ -402,7 +406,7 @@ function renderLevelUp(area){
   sfx("level-up");
   startMusic("town");
   const card = h("div", {class:"card"},
-    h("h2", {}, `⭐ Level ${newLevel}!`),
+    h("h2", {}, h("span", {style:"display:inline-flex;align-items:center;gap:8px"}, icon("sparkle", 20), `Level ${newLevel}`)),
     h("p", {class:"muted"}, `${ch.name} grows stronger.`));
   const state = { hpMode:"avg", asi:[], subclass:"", newSpells:[], newCantrips:[] };
 
@@ -486,7 +490,7 @@ function renderLevelUp(area){
     saveNow();
     sfx("victory");
     renderCorridor();
-  }}, "✔ Confirm level up"));
+  }}, icon("check"), "Confirm level up"));
   area.append(card);
   clear($("actionbar"));
   function pickSpell(e, arr, cap){
@@ -509,7 +513,7 @@ function renderDeath(){
   showScreen("screen-end");
   const body = clear($("end-body"));
   body.append(
-    h("div", {class:"bigicon", style:"font-size:72px"}, "☠"),
+    h("div", {class:"bigicon center", style:"color:var(--bad);margin-top:36px"}, bigIcon("skull", 72)),
     h("h1", {class:"title-hero", style:"color:var(--bad)"}, "You have fallen"),
     h("p", {class:"subtitle"}, `${ch.name} — Level ${ch.level} ${ch.race} ${ch.class}`),
     h("div", {class:"card"},
@@ -529,7 +533,7 @@ function renderVictory(){
   showScreen("screen-end");
   const body = clear($("end-body"));
   body.append(
-    h("div", {class:"bigicon", style:"font-size:72px"}, "🏆"),
+    h("div", {class:"bigicon center", style:"color:var(--accent);margin-top:36px"}, bigIcon("trophy", 72)),
     h("h1", {class:"title-hero"}, "The depths are conquered!"),
     h("p", {class:"subtitle"}, `${ch.name} emerges into daylight, breathing hard, rich and alive.`),
     h("div", {class:"card"},
@@ -537,7 +541,7 @@ function renderVictory(){
       h("div", {class:"sheetrow"}, h("span", {class:"k"}, "Monsters slain"), h("span", {class:"v"}, run.kills)),
       h("div", {class:"sheetrow"}, h("span", {class:"k"}, "XP earned"), h("span", {class:"v"}, run.xpEarned)),
       h("div", {class:"sheetrow"}, h("span", {class:"k"}, "Gold"), h("span", {class:"v"}, ch.equipment.gold + " gp"))),
-    h("button", {class:"btn primary", onclick: () => { clearRun(ch.id); saveNow(); renderRoster(); showScreen("screen-roster"); }}, "⚔ Rest — then descend again"));
+    h("button", {class:"btn primary", onclick: () => { clearRun(ch.id); saveNow(); renderRoster(); showScreen("screen-roster"); }}, icon("swords"), "Rest — then descend again"));
   saveNow();
 }
 

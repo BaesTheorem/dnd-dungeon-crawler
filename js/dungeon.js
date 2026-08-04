@@ -55,7 +55,7 @@ function buildEncounter(ch, floor, budget){
     }
   }
   if(!best) best = { m: pick(pool), n: 1 };
-  const tags = ["", "B", "C"];
+  const tags = ["A", "B", "C"];
   return Array.from({length: best.n}, (_, i) => materializeMonster(best.m, best.n > 1 ? tags[i] || String(i+1) : ""));
 }
 function buildEliteEncounter(ch, floor){

@@ -8,6 +8,7 @@ import { idx, getWeapon, classSpellList, findGearInText } from "../data/data.js"
 import * as C from "./character.js";
 import { addItem } from "./dungeon.js";
 import { sfx } from "./audio.js";
+import { icon } from "./icons.js";
 
 let draft = null;
 let step = 0;
@@ -99,7 +100,7 @@ function sAbilities(body){
   const pool = draft.genMode === "array" ? STANDARD_ARRAY : draft.genMode === "rolled" ? (draft.rolledArray || []) : null;
   if(draft.genMode === "rolled"){
     card.append(h("p", {class:"center", style:"font-size:18px;font-weight:700"}, (draft.rolledArray||[]).join(" · ")),
-      h("button", {class:"btn small", onclick: () => { draft.rolledArray = rollAbilityScores(); ABILITIES.forEach(([a]) => draft.baseVals[a] = null); sfx("roll"); render(); }}, "↻ Reroll"));
+      h("button", {class:"btn small", onclick: () => { draft.rolledArray = rollAbilityScores(); ABILITIES.forEach(([a]) => draft.baseVals[a] = null); sfx("roll"); render(); }}, icon("d20", 15), "Reroll"));
   }
   if(draft.genMode === "pointbuy"){
     const spent = pointBuyTotal(draft.baseVals) ?? 0;
@@ -361,7 +362,7 @@ function sReview(body){
   ];
   body.append(h("div", {class:"card"}, h("h2", {}, "Ready?"),
     ...lines.map(([k, v]) => h("div", {class:"sheetrow"}, h("span", {class:"k"}, k), h("span", {class:"v"}, v || "—")))));
-  body.append(h("button", {class:"btn primary", onclick: finalize}, "⚔ Begin the descent"));
+  body.append(h("button", {class:"btn primary", onclick: finalize}, icon("swords"), "Begin the descent"));
 }
 function bgSkillsOf(ch){
   const bg = idx().bgByName.get(String(ch.background).toLowerCase());

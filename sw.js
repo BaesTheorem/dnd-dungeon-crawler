@@ -6,13 +6,13 @@
      served cache-first — a version-coherent set of ES modules, no old-module/new-shell skew offline.
    - activate deletes every cache except the current one.
    CACHE is stamped by .githooks/pre-commit on every commit. */
-const CACHE = "dnd-crawler-v1.0.2";
+const CACHE = "dnd-crawler-v1.0.3";
 const DOC = "./index.html";
 const ASSETS = [
   "./",
   "./index.html",
   "./css/app.css",
-  "./js/app.js", "./js/ui.js", "./js/state.js", "./js/storage.js", "./js/dice.js",
+  "./js/app.js", "./js/ui.js", "./js/icons.js", "./js/state.js", "./js/storage.js", "./js/dice.js",
   "./js/conditions.js", "./js/rules.js", "./js/character.js", "./js/builder.js",
   "./js/sheet.js", "./js/combat.js", "./js/combat-ui.js", "./js/dungeon.js", "./js/audio.js",
   "./data/data.js", "./data/tables.js", "./data/source-data.json",
