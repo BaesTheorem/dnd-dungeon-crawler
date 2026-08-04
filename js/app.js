@@ -250,16 +250,16 @@ function renderCorridor(){
   };
   const castBar = () => {
     clear(bar);
-    D.castableOutOfCombat(ch).forEach(({n, mech}) => {
+    D.castableOutOfCombat(ch).forEach(({n, mech, opt, label}) => {
       const s = mech.spell;
       const already = mech.buff === "mageArmor" && (ch.effects || []).some(b => b.buff === "mageArmor");
       bar.append(h("button", {class:"btn primary", disabled: already ? "" : null, onclick: () => {
-        const r = D.castUtility(ch, n);
+        const r = D.castUtility(ch, n, opt);
         r.events.forEach(e => { if(e.t === "sfx") sfx(e.name); });
         renderEvents(logEl(), r.events);
         queueSave();
         mainBar();
-      }}, `${n}${s.level ? ` (L${s.level})` : " (cantrip)"}${already ? " — active" : ""}`));
+      }}, label || `${n}${s.level ? ` (L${s.level})` : " (cantrip)"}${already ? " — active" : ""}`));
     });
     bar.append(h("button", {class:"btn", onclick: mainBar}, "Cancel"));
   };

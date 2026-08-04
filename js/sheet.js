@@ -31,7 +31,9 @@ export function renderSheet(ch){
   const body = clear($("sheet-body"));
   const combat = getCombat();
   const buffs = combat ? combat.playerBuffs : [];          // armorClass folds in ch.effects itself
-  const shownBuffs = [...(ch.effects || []), ...buffs];
+  const shownBuffs = [
+    ...(ch.familiar && ch.familiar.alive ? [{label:`${ch.familiar.form} familiar — scouts, keeps watch, Helps in battle`}] : []),
+    ...(ch.effects || []), ...buffs];
   if(tab === "stats"){
     body.append(
       h("h2", {style:"margin:0 0 2px"}, ch.name),

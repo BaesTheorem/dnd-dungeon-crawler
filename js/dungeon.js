@@ -7,7 +7,7 @@ import { xpForCR, encounterMultiplier, levelForXP, XP_TABLE } from "./rules.js";
 import { monstersInBand, getMonster } from "../data/data.js";
 import { materializeMonster, startCombat } from "./combat.js";
 import * as C from "./character.js";
-import { condEffects, advFor } from "./conditions.js";
+import { condEffects, advFor, combineAdv } from "./conditions.js";
 
 export function newRun(ch){
   return {
@@ -106,8 +106,12 @@ export function nextRoom(run, ch){
   else if(type === "trap"){
     room.trap = pick(TRAPS.slice(0, Math.min(TRAPS.length, floor + 2)));   // deadlier traps only on deeper floors
     room.trapState = "hidden";
-    room.detected = C.passivePerception(ch) >= room.trap.detectDC;
-    if(room.detected) room.trapState = "detected";
+    const scout = (ch.familiar && ch.familiar.alive) ? 5 : 0;              // the owl flies ahead
+    room.detected = C.passivePerception(ch) + scout >= room.trap.detectDC;
+    if(room.detected){
+      room.trapState = "detected";
+      if(scout) room.spottedByFamiliar = true;
+    }
   }
   else if(type === "treasure"){
     room.gold = rollGold(tune.gold);
@@ -171,14 +175,18 @@ export function trapAct(run, ch, action){
   const eff = condEffects(ch.conditions, ch.exhaustion);
   const finish = () => { room.resolved = true; room.trapState = "done"; };
   if(action === "search"){
-    const res = d20Roll({ label:"Search (Perception)", rollType:"Check", mod: C.skillBonus(ch, "perception"), adv: advFor(eff, ["check","skill:perception"]) });
+    const famAdv = familiarAlive(ch) ? "adv" : null;      // two pairs of eyes
+    const bonus = consumeCheckBonus(ch, events);
+    const res = d20Roll({ label:"Search (Perception)", rollType:"Check", mod: C.skillBonus(ch, "perception") + bonus,
+      adv: combineAdv(advFor(eff, ["check","skill:perception"]), famAdv) });
     events.push({t:"roll", res});
-    if(res.total >= trap.detectDC){ room.trapState = "detected"; room.detected = true; events.push({t:"log", text:`You spot it: ${trap.name}!`}); }
+    if(res.total >= trap.detectDC){ room.trapState = "detected"; room.detected = true; events.push({t:"log", text:`You spot it: ${trap.name}!${familiarAlive(ch) ? " (Your owl shrieks a warning.)" : ""}`}); }
     else { events.push({t:"log", text:"You find nothing… you'll have to chance it."}); room.trapState = "unfound"; }
     return { events };
   }
   if(action === "disarm"){
-    const res = d20Roll({ label:`Disarm (${trap.disarmSkill})`, rollType:"Check", mod: C.skillBonus(ch, trap.disarmSkill), adv: advFor(eff, ["check","skill:"+trap.disarmSkill]) });
+    const bonus = consumeCheckBonus(ch, events);
+    const res = d20Roll({ label:`Disarm (${trap.disarmSkill})`, rollType:"Check", mod: C.skillBonus(ch, trap.disarmSkill) + bonus, adv: advFor(eff, ["check","skill:"+trap.disarmSkill]) });
     events.push({t:"roll", res});
     if(res.total >= trap.disarmDC){ events.push({t:"sfx", name:"treasure"}, {t:"log", text:`You disarm the ${trap.name}.`}); finish(); return { events, done:true }; }
     events.push({t:"log", text:"You fumble it — the trap springs!"});
@@ -233,16 +241,19 @@ export function openChest(run, ch){
 /* ---- Rest ---- */
 export function shortRest(run, ch, diceToSpend){
   const events = [];
-  if(Math.random() < 0.15){
+  if(Math.random() < (familiarAlive(ch) ? 0.05 : 0.15)){  // the owl keeps watch
     events.push({t:"log", text:"Something found you while you rested!"});
     return { events, ambush:true };
   }
   const cls = C.charClass(ch); const hd = (cls && cls.hd) || 8;
   let healed = 0;
+  const ri = (ch.effects || []).findIndex(b => b.buff === "rations");
+  const perDie = ri >= 0 ? (ch.effects[ri].amount || 2) : 0;
+  if(ri >= 0){ ch.effects.splice(ri, 1); events.push({t:"log", text:"The seasoned rations do you good."}); }
   const n = Math.min(diceToSpend, ch.hp.hitDiceCur);
   for(let i = 0; i < n; i++){
     ch.hp.hitDiceCur -= 1;
-    healed += Math.max(1, rollDie(hd) + C.abilityMod(ch, "con"));
+    healed += Math.max(1, rollDie(hd) + C.abilityMod(ch, "con") + perDie);
   }
   ch.hp.cur = Math.min(C.computeMaxHP(ch), ch.hp.cur + healed);
   C.shortRestRecover(ch);
@@ -262,7 +273,7 @@ export function shortRest(run, ch, diceToSpend){
 export function longRestHere(run, ch){
   const events = [];
   if(run.longRestUsedThisFloor){ events.push({t:"log", text:"You've already taken a long rest on this floor."}); return { events }; }
-  if(Math.random() < 0.15){
+  if(Math.random() < (familiarAlive(ch) ? 0.05 : 0.15)){
     events.push({t:"log", text:"Your sleep is cut short — something found you!"});
     return { events, ambush:true };
   }
@@ -306,27 +317,57 @@ export function eventChoose(run, ch, choiceKey){
   return { events };
 }
 
-/* ---- Out-of-combat casting (corridor): healing spells and persistent buffs like Mage Armor ---- */
+/* ---- Out-of-combat casting (corridor): healing, persistent buffs, and utility rituals ---- */
 import { spellMechanics } from "../data/data.js";
+const hasSlotFor = (ch, level) =>
+  level === 0 || Object.keys(ch.spells.slots || {}).some(l => +l >= level && ch.spells.slots[l].cur > 0);
+
 export function castableOutOfCombat(ch){
-  return (ch.spells.known || []).map(n => ({ n, mech: spellMechanics(n, ch.level) }))
-    .filter(x => x.mech && (x.mech.kind === "heal" || x.mech.buff === "mageArmor"))
-    .filter(x => {
-      if(x.mech.spell.level === 0) return true;
-      return Object.keys(ch.spells.slots || {}).some(l => +l >= x.mech.spell.level && ch.spells.slots[l].cur > 0);
-    });
+  const out = [];
+  (ch.spells.known || []).forEach(n => {
+    const mech = spellMechanics(n, ch.level);
+    if(!mech || !hasSlotFor(ch, mech.spell.level)) return;
+    const key = n.toLowerCase();
+    if(mech.kind === "heal" || mech.buff === "mageArmor"){ out.push({ n, mech }); return; }
+    if(key === "find familiar" && !(ch.familiar && ch.familiar.alive))
+      out.push({ n, mech, opt:"summon", label:"Find Familiar — summon your owl (L1)" });
+    if(key === "prestidigitation"){
+      out.push({ n, mech, opt:"prepare", label:"Prestidigitation — tidy & prepare (+2 on your next check)" });
+      out.push({ n, mech, opt:"season", label:"Prestidigitation — season rations (+2 HP per Hit Die next short rest)" });
+    }
+  });
+  return out;
 }
-export function castUtility(ch, name){
+
+export function castUtility(ch, name, opt){
   const mech = spellMechanics(name, ch.level);
   const events = [];
   if(!mech) return { events };
   const s = mech.spell;
+  const key = s.name.toLowerCase();
   let slotLevel = 0;
   if(s.level > 0){
     const lvls = Object.keys(ch.spells.slots || {}).map(Number).filter(l => l >= s.level && ch.spells.slots[l].cur > 0);
     if(!lvls.length){ events.push({t:"log", text:"No spell slots left."}); return { events }; }
     slotLevel = Math.min(...lvls);
     ch.spells.slots[slotLevel].cur -= 1;
+  }
+  if(key === "find familiar"){
+    ch.familiar = { form:"Owl", alive:true };
+    events.push({t:"sfx", name:"heal"}, {t:"log", text:"A spectral owl takes shape and settles on your shoulder. It scouts for traps, keeps watch while you rest, and can harry foes in battle."});
+    return { events };
+  }
+  if(key === "prestidigitation"){
+    ch.effects = ch.effects || [];
+    if(opt === "season"){
+      if(!ch.effects.some(b => b.buff === "rations")) ch.effects.push({ buff:"rations", amount:2, label:"Seasoned rations (+2 HP/die next short rest)" });
+      events.push({t:"sfx", name:"spell"}, {t:"log", text:"You season and warm your rations — your next short rest will restore +2 HP per Hit Die."});
+    } else {
+      ch.effects = ch.effects.filter(b => b.buff !== "checkBonus");
+      ch.effects.push({ buff:"checkBonus", amount:2, label:"Prepared (+2 next check)" });
+      events.push({t:"sfx", name:"spell"}, {t:"log", text:"You clean, mend, and ready everything just so — +2 on your next skill check."});
+    }
+    return { events };
   }
   if(mech.kind === "heal"){
     const dice = [...mech.heal.dice];
@@ -345,6 +386,17 @@ export function castUtility(ch, name){
   }
   return { events };
 }
+
+/* Consume the one-shot Prestidigitation check bonus (skill checks in trap/event rooms). */
+function consumeCheckBonus(ch, events){
+  const i = (ch.effects || []).findIndex(b => b.buff === "checkBonus");
+  if(i < 0) return 0;
+  const amt = ch.effects[i].amount || 2;
+  ch.effects.splice(i, 1);
+  events.push({t:"log", text:`(+${amt} from your preparations)`});
+  return amt;
+}
+const familiarAlive = ch => !!(ch.familiar && ch.familiar.alive);
 
 /* ---- Floor / run advancement ---- */
 export function advanceAfterRoom(run, ch){

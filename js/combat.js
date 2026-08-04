@@ -18,10 +18,13 @@ export function materializeMonster(mon, tag = ""){
     key: mon.name.toLowerCase(), name: mon.name + (tag ? " " + tag : ""),
     ac: mon.ac || 10, hp: C.monsterMaxHP(mon), maxHP: C.monsterMaxHP(mon),
     dexMod: Math.floor(((mon.dex || 10) - 10) / 2),
+    intMod: Math.floor(((mon.int || 10) - 10) / 2),
+    wisMod: Math.floor(((mon.wis || 10) - 10) / 2),
     cr: mon.cr, crNum: mon.crNum,
     attacks: monsterAttacks(mon), multi: monsterHasMultiattack(mon),
     conditions: [],                       // [{k, save:{abil,dc}|null, rounds}]
     recharge: {},                         // attackName -> ready:boolean
+    distracted: 0, loseActions: 0, sawIllusion: false,   // illusion-cantrip state
     flavor: mon.type || "",
   };
 }
@@ -58,6 +61,7 @@ function beginPlayerTurn(st, ch){
   st.attacksLeft = 0;
   st.bonusUsed = false;
   st.reactionUsed = false;                                 // reactions refresh at the start of your turn
+  st.helpUsed = false;                                     // familiar Help refreshes too
   st.mq = null;
   st.playerBuffs = st.playerBuffs.filter(b => b.until !== "turnStart");   // Shield expires now
   // Heroism buff: temp HP at the start of your turn.
@@ -87,6 +91,16 @@ function autoCritVs(targetConds, melee){
 
 function blessBonus(st){
   return st.playerBuffs.some(b => b.buff === "bless") ? rollDie(4) : 0;
+}
+/* One-shot attack bonuses (Prestidigitation sparks, generic arcana): rolled and removed. */
+function consumeNextAtkBonus(st){
+  let total = 0;
+  st.playerBuffs = st.playerBuffs.filter(b => {
+    if(b.buff !== "nextAtkBonus") return true;
+    total += rollDie(b.d || 4);
+    return false;
+  });
+  return total;
 }
 
 function applyDamageToPlayer(st, ch, amount, source){
@@ -143,7 +157,8 @@ export function playerAttack(st, ch, weaponName, targetIdx){
   const eff = condEffects(ch.conditions, ch.exhaustion);
   let adv = combineAdv(advFor(eff, ["attack"]), advAgainstTarget(monsterCondKeys(target), !atk.ranged, false));
   if(st.barbsAdv){ adv = combineAdv(adv, "adv"); st.barbsAdv = false; }   // Silvery Barbs' self-empowerment
-  const bb = blessBonus(st);
+  if(st.helpAdv){ adv = combineAdv(adv, "adv"); st.helpAdv = false; }     // familiar's Help action
+  const bb = blessBonus(st) + consumeNextAtkBonus(st);
   const res = d20Roll({ label:`${atk.name} vs ${target.name}`, rollType:"Attack", mod: atk.toHit + bb, adv });
   st.events.push({t:"roll", res});
   const critFloor = /champion/i.test(ch.subclass || "") ? 19 : 20;
@@ -165,7 +180,7 @@ export function playerAttack(st, ch, weaponName, targetIdx){
   return st;
 }
 
-export function playerCastSpell(st, ch, spellName, slotLevel, targetIdx){
+export function playerCastSpell(st, ch, spellName, slotLevel, targetIdx, opt){
   if(st.phase !== "player" || st.actionsLeft <= 0) return st;
   const mech = spellMechanics(spellName, ch.level);
   if(!mech) return st;
@@ -215,8 +230,10 @@ export function playerCastSpell(st, ch, spellName, slotLevel, targetIdx){
     const target = st.monsters[targetIdx];
     if(!target || target.hp <= 0) return st;
     const eff = condEffects(ch.conditions, ch.exhaustion);
-    const adv = combineAdv(advFor(eff, ["attack"]), advAgainstTarget(monsterCondKeys(target), false, false));
-    const bb = blessBonus(st);
+    let adv = combineAdv(advFor(eff, ["attack"]), advAgainstTarget(monsterCondKeys(target), false, false));
+    if(st.barbsAdv){ adv = combineAdv(adv, "adv"); st.barbsAdv = false; }
+    if(st.helpAdv){ adv = combineAdv(adv, "adv"); st.helpAdv = false; }
+    const bb = blessBonus(st) + consumeNextAtkBonus(st);
     const res = d20Roll({ label:`${lbl} vs ${target.name}`, rollType:"Spell attack", mod: (C.spellAttackBonus(ch) || 0) + bb, adv });
     st.events.push({t:"roll", res});
     const crit = res.dice[0].v === 20;
@@ -242,9 +259,88 @@ export function playerCastSpell(st, ch, spellName, slotLevel, targetIdx){
     if(s.conc) st.playerBuffs.push({ buff:"conc-marker", label:`Concentrating: ${s.name}`, conc:true });
     castStep(st, ch);                                   // first target resolves now; UI steps the rest
   } else {
-    st.events.push({t:"log", text:`You cast ${lbl}.`});
+    castUtilityInCombat(st, ch, s, lbl, slotLevel, targetIdx, opt);
   }
   checkVictory(st, ch);
+  return st;
+}
+
+/* ---- Utility spells in combat: bespoke effects for the classics, a real fallback for the rest
+   (no castable spell is ever a dead button). ---- */
+export function utilityOptions(ch, name){
+  const key = String(name).toLowerCase();
+  if(key === "minor illusion") return [
+    { opt:"distract", label:"Phantom noise — target's next attack has disadvantage" },
+    { opt:"lure", label:"Decoy — INT check or it wastes its next action (once per enemy)" },
+  ];
+  if(key === "prestidigitation") return [
+    { opt:"sparks", label:"Sparks in the eyes — +1d4 on your next attack" },
+    { opt:"chill", label:"Chill its grip — target's next attack takes -1d4" },
+  ];
+  if(key === "find familiar") return [
+    { opt:"summon", label: ch.familiar && ch.familiar.alive ? "Your familiar is already with you" : "Summon your owl familiar" },
+  ];
+  return null;                                            // generic fallback
+}
+
+function castUtilityInCombat(st, ch, s, lbl, slotLevel, targetIdx, opt){
+  const key = s.name.toLowerCase();
+  const target = st.monsters[targetIdx];
+  if(key === "minor illusion" && target && target.hp > 0){
+    if(opt === "lure"){
+      if(target.sawIllusion){
+        st.events.push({t:"log", text:`${target.name} has already seen through your illusions.`});
+        return;
+      }
+      target.sawIllusion = true;
+      const dc = C.spellSaveDC(ch) || 12;
+      const chk = d20Roll({ label:`${target.name} Investigation`, rollType:"Check", mod: target.intMod ?? 0 });
+      st.events.push({t:"roll", res:chk});
+      if(chk.total < dc){
+        target.loseActions = (target.loseActions || 0) + 1;
+        st.events.push({t:"sfx", name:"spell"}, {t:"log", text:`${target.name} turns to investigate the phantom — it will waste its next action!`});
+      } else {
+        st.events.push({t:"log", text:`${target.name} sniffs out the trick (DC ${dc}).`});
+      }
+    } else {
+      target.distracted = (target.distracted || 0) + 1;
+      st.events.push({t:"sfx", name:"spell"}, {t:"log", text:`A phantom sound snaps ${target.name}'s head around — its next attack has disadvantage.`});
+    }
+    return;
+  }
+  if(key === "prestidigitation" && target && target.hp > 0){
+    if(opt === "chill"){
+      target.chilled = (target.chilled || 0) + 1;
+      st.events.push({t:"sfx", name:"spell"}, {t:"log", text:`You chill ${target.name}'s weapon-hand — its next attack takes -1d4.`});
+    } else {
+      st.playerBuffs.push({ buff:"nextAtkBonus", d:4, label:"Sparks (+1d4 next attack)" });
+      st.events.push({t:"sfx", name:"spell"}, {t:"log", text:`Sparks burst before ${target.name}'s eyes — +1d4 on your next attack.`});
+    }
+    return;
+  }
+  if(key === "find familiar"){
+    ch.familiar = { form:"Owl", alive:true };
+    st.events.push({t:"sfx", name:"heal"}, {t:"log", text:"A spectral owl takes shape and settles on your shoulder. It will scout for traps, keep watch while you rest, and can harry your foes (Help)."});
+    return;
+  }
+  // Generic fallback: raw arcana. Cantrips sharpen your next strike; a real slot buys advantage + a ward.
+  if(s.level === 0){
+    st.playerBuffs.push({ buff:"nextAtkBonus", d:4, label:`${s.name} (+1d4 next attack)` });
+    st.events.push({t:"sfx", name:"spell"}, {t:"log", text:`You weave ${lbl} into your stance — +1d4 on your next attack.`});
+  } else {
+    st.helpAdv = true;
+    ch.hp.temp = Math.max(ch.hp.temp, slotLevel * 2);
+    st.events.push({t:"sfx", name:"spell"},
+      {t:"log", text:`You channel ${lbl} into raw arcana — advantage on your next attack and a ${slotLevel * 2}-point ward.`});
+  }
+}
+
+/* Familiar Help action: free once per round while the owl lives. */
+export function playerFamiliarHelp(st, ch){
+  if(st.phase !== "player" || st.helpUsed || !(ch.familiar && ch.familiar.alive)) return st;
+  st.helpUsed = true;
+  st.helpAdv = true;
+  st.events.push({t:"sfx", name:"ui-tap"}, {t:"log", text:"Your owl dives at the enemy's face — advantage on your next attack."});
   return st;
 }
 
@@ -378,6 +474,11 @@ export function monsterStep(st, ch){
   // act: choose an attack, queue its swings ahead of this monster's upkeep
   const incap = m.conditions.some(c => ["paralyzed","stunned","unconscious","petrified","incapacitated"].includes(c.k));
   if(incap){ st.events.push({t:"log", text:`${m.name} is ${m.conditions[0].k} and cannot act.`}); return true; }
+  if(m.loseActions > 0){                                  // Minor Illusion's decoy: it investigates instead
+    m.loseActions -= 1;
+    st.events.push({t:"log", text:`${m.name} wastes its turn prodding at the illusion.`});
+    return true;
+  }
   const attacks = m.attacks;
   if(!attacks.length) return true;
   attacks.forEach(a => {
@@ -414,8 +515,12 @@ function lowestSlot(ch, minLvl = 1){
 
 function attemptSwing(st, ch, mi, m, atk){
   const mEff = condEffects(monsterCondKeys(m), 0);
-  const adv = combineAdv(advFor(mEff, ["attack"]), advAgainstTarget([...ch.conditions], true, st.playerDodge));
-  const res = d20Roll({ label:`${m.name} — ${atk.name}`, rollType:"Attack", mod:atk.toHit, adv });
+  let adv = combineAdv(advFor(mEff, ["attack"]), advAgainstTarget([...ch.conditions], true, st.playerDodge));
+  if(m.distracted > 0){ m.distracted -= 1; adv = combineAdv(adv, "disadv"); }         // Minor Illusion
+  let atkMod = atk.toHit;
+  if(m.chilled > 0){ m.chilled -= 1; const p = rollDie(4); atkMod -= p;               // Prestidigitation chill
+    st.events.push({t:"log", text:`${m.name}'s chilled grip falters (-${p} to hit).`}); }
+  const res = d20Roll({ label:`${m.name} — ${atk.name}`, rollType:"Attack", mod:atkMod, adv });
   st.events.push({t:"roll", res});
   const ac = C.armorClass(ch, st.playerBuffs);
   const crit = res.dice[0].v === 20;

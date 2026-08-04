@@ -143,18 +143,35 @@ function renderBar(){
     bar.append(h("button", {class:"btn", onclick: () => { submenu = null; render(); }}, "Cancel"));
     return;
   }
+  if(submenu && submenu.opts){                            // utility spell: pick which trick
+    const { n, lo } = submenu;
+    CB.utilityOptions(ch, n).forEach(o => {
+      bar.append(h("button", {class:"btn primary", onclick: () => { submenu = null; act(() => CB.playerCastSpell(st, ch, n, lo, targetIdx, o.opt)); }}, o.label));
+    });
+    bar.append(h("button", {class:"btn", onclick: () => { submenu = "cast"; render(); }}, "Back"));
+    return;
+  }
   if(submenu === "cast"){
-    const canCast = ch.spells.known.map(n => ({ n, mech: spellMechanics(n, ch.level) })).filter(x => x.mech);
+    const canCast = ch.spells.known.map(n => ({ n, mech: spellMechanics(n, ch.level) })).filter(x => x.mech)
+      .filter(x => !(x.n.toLowerCase() === "find familiar" && ch.familiar && ch.familiar.alive));
     canCast.forEach(({n, mech}) => {
       const s = mech.spell;
-      if(s.level === 0){
-        bar.append(h("button", {class:"btn primary", onclick: () => { submenu = null; act(() => CB.playerCastSpell(st, ch, n, 0, targetIdx)); }}, `${n} (cantrip)`));
-      } else {
+      let lo = 0;
+      if(s.level > 0){
         const lvls = Object.keys(ch.spells.slots).map(Number).filter(l => l >= s.level && ch.spells.slots[l].cur > 0);
         if(!lvls.length) return;
-        const lo = Math.min(...lvls);
-        bar.append(h("button", {class:"btn primary", onclick: () => { submenu = null; act(() => CB.playerCastSpell(st, ch, n, lo, targetIdx)); }},
-          `${n} (L${lo} slot: ${ch.spells.slots[lo].cur})`));
+        lo = Math.min(...lvls);
+      }
+      const slotNote = s.level === 0 ? "cantrip" : `L${lo} slot: ${ch.spells.slots[lo].cur}`;
+      const opts = mech.kind === "utility" ? CB.utilityOptions(ch, n) : null;
+      if(opts && opts.length > 1){
+        bar.append(h("button", {class:"btn primary", onclick: () => { submenu = { opts:true, n, lo }; render(); }}, `${n} (${slotNote}) …`));
+      } else {
+        const suffix = mech.kind === "utility" && !opts
+          ? (s.level === 0 ? " — +1d4 next attack" : " — adv next attack + ward")
+          : "";
+        bar.append(h("button", {class:"btn primary", onclick: () => { submenu = null; act(() => CB.playerCastSpell(st, ch, n, lo, targetIdx, opts ? opts[0].opt : undefined)); }},
+          `${n} (${slotNote})${suffix}`));
       }
     });
     if(!canCast.length) bar.append(h("button", {class:"btn", disabled:""}, "No castable spells"));
@@ -183,6 +200,8 @@ function renderBar(){
     grid.append(h("button", {class:"btn", onclick: () => act(() => CB.playerActionSurge(st, ch))}, icon("bolt"), "Action Surge"));
   if(ch.resources.channelDivinity?.cur > 0)
     grid.append(h("button", {class:"btn", disabled: st.actionsLeft <= 0 ? "" : null, onclick: () => act(() => CB.playerChannelDivinity(st, ch))}, icon("sun"), "Channel Divinity"));
+  if(ch.familiar && ch.familiar.alive)
+    grid.append(h("button", {class:"btn", disabled: st.helpUsed ? "" : null, onclick: () => act(() => CB.playerFamiliarHelp(st, ch))}, icon("eye"), "Owl: Help"));
   grid.append(h("button", {class:"btn", disabled: st.actionsLeft <= 0 ? "" : null, onclick: () => act(() => CB.playerFlee(st, ch, floor))}, icon("run"), "Flee"));
   bar.append(grid);
   bar.append(h("button", {class:"btn", onclick: () => act(() => CB.endPlayerTurn(st, ch))}, icon("next"), "End turn"));

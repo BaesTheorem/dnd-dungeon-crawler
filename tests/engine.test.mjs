@@ -12,7 +12,7 @@ import { condEffects, advFor, combineAdv, autofails } from "../js/conditions.js"
 import { mod, profBonus, pointBuyTotal, slotsFor, acFrom, levelForXP, xpForCR, avgOfFormula, encounterMultiplier } from "../js/rules.js";
 import { injectData, idx, monsterAttacks, getMonster, spellMechanics, getWeapon, getArmor, classSpellList } from "../data/data.js";
 import * as C from "../js/character.js";
-import { materializeMonster, startCombat, playerAttack, playerCastSpell, endPlayerTurn, monsterTurn, monsterStep, reactionChoose, castStep, deathSave, combatOver, playerDodge } from "../js/combat.js";
+import { materializeMonster, startCombat, playerAttack, playerCastSpell, endPlayerTurn, monsterTurn, monsterStep, reactionChoose, castStep, deathSave, combatOver, playerDodge, playerFamiliarHelp, utilityOptions } from "../js/combat.js";
 import { newRun, nextRoom, enterCombat, resolveCombat, trapAct, openChest, shortRest, castUtility, castableOutOfCombat } from "../js/dungeon.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -513,6 +513,79 @@ test("monsterStep pauses on a reaction window instead of resolving the swing", (
     }
   }
   assert.ok(sawPause, "a reaction window occurred across trials");
+});
+
+/* ---- familiar & utility cantrips ---- */
+test("Find Familiar summons an owl; Help grants advantage once per round", () => {
+  const ch = makeWizard();
+  ch.spells.known.push("Find Familiar");
+  const r = castUtility(ch, "Find Familiar", "summon");
+  assert.ok(ch.familiar && ch.familiar.alive, "owl summoned out of combat");
+  assert.equal(ch.spells.slots[1].cur, ch.spells.slots[1].max - 1, "slot spent");
+  const st = startCombat(ch, [materializeMonster(getMonster("Goblin"))]);
+  st.phase = "player"; st.actionsLeft = 1; st.helpUsed = false;
+  playerFamiliarHelp(st, ch);
+  assert.ok(st.helpAdv && st.helpUsed);
+  st.monsters[0].hp = st.monsters[0].maxHP = 999;
+  playerAttack(st, ch, "Dagger", 0);
+  const atkRoll = st.events.filter(e => e.t === "roll" && e.res.rt === "Attack").pop();
+  assert.equal(atkRoll.res.adv, "adv", "Help advantage consumed by the attack");
+  assert.equal(st.helpAdv, false);
+  playerFamiliarHelp(st, ch);
+  assert.equal(st.helpAdv, false, "only once per round");
+});
+
+test("Minor Illusion: distract imposes disadvantage; lure can waste an action (once per enemy)", () => {
+  const ch = makeWizard();
+  ch.spells.known.push("Minor Illusion");
+  const st = startCombat(ch, [materializeMonster(getMonster("Goblin"))]);
+  st.phase = "player"; st.actionsLeft = 1;
+  st.monsters[0].hp = st.monsters[0].maxHP = 999;
+  playerCastSpell(st, ch, "Minor Illusion", 0, 0, "distract");
+  assert.equal(st.monsters[0].distracted, 1);
+  st.actionsLeft = 1;
+  playerCastSpell(st, ch, "Minor Illusion", 0, 0, "lure");
+  assert.ok(st.monsters[0].sawIllusion, "lure marks the enemy");
+  st.actionsLeft = 1;
+  const before = st.monsters[0].loseActions || 0;
+  playerCastSpell(st, ch, "Minor Illusion", 0, 0, "lure");
+  assert.equal(st.monsters[0].loseActions || 0, before, "second lure on the same enemy does nothing");
+  assert.ok(utilityOptions(ch, "Minor Illusion").length === 2);
+});
+
+test("Prestidigitation: sparks buff your next attack; prepare/season work out of combat", () => {
+  const ch = makeWizard();
+  ch.spells.known.push("Prestidigitation");
+  const st = startCombat(ch, [materializeMonster(getMonster("Goblin"))]);
+  st.phase = "player"; st.actionsLeft = 1;
+  st.monsters[0].hp = st.monsters[0].maxHP = 999;
+  playerCastSpell(st, ch, "Prestidigitation", 0, 0, "sparks");
+  assert.ok(st.playerBuffs.some(b => b.buff === "nextAtkBonus"));
+  st.actionsLeft = 1;
+  playerAttack(st, ch, "Dagger", 0);
+  assert.ok(!st.playerBuffs.some(b => b.buff === "nextAtkBonus"), "sparks consumed by the attack");
+  castUtility(ch, "Prestidigitation", "prepare");
+  assert.ok(ch.effects.some(b => b.buff === "checkBonus"));
+  castUtility(ch, "Prestidigitation", "season");
+  assert.ok(ch.effects.some(b => b.buff === "rations"));
+  const list = castableOutOfCombat(ch);
+  assert.equal(list.filter(x => x.n === "Prestidigitation").length, 2, "two out-of-combat tricks listed");
+});
+
+test("generic utility fallback: no castable spell is a dead button", () => {
+  const ch = makeWizard();
+  ch.spells.known.push("Dancing Lights", "Identify");
+  const st = startCombat(ch, [materializeMonster(getMonster("Goblin"))]);
+  st.phase = "player"; st.actionsLeft = 1;
+  st.monsters[0].hp = st.monsters[0].maxHP = 999;
+  playerCastSpell(st, ch, "Dancing Lights", 0, 0);       // unmapped cantrip
+  assert.ok(st.playerBuffs.some(b => b.buff === "nextAtkBonus"), "cantrip fallback: +1d4 next attack");
+  st.actionsLeft = 1;
+  const slotBefore = ch.spells.slots[1].cur;
+  playerCastSpell(st, ch, "Identify", 1, 0);             // unmapped leveled spell
+  assert.equal(ch.spells.slots[1].cur, slotBefore - 1);
+  assert.ok(st.helpAdv, "leveled fallback: advantage on next attack");
+  assert.ok(ch.hp.temp >= 2, "and a ward");
 });
 
 test("short rest spends hit dice and heals", () => {
