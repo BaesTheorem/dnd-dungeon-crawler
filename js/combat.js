@@ -246,6 +246,21 @@ export function playerCastSpell(st, ch, spellName, slotLevel, targetIdx, opt, fr
         {t:"log", text:`${crit ? "CRITICAL! " : ""}${target.name} takes ${dmg.total} damage${target.hp <= 0 ? " and falls!" : ""}.`});
       if(target.hp <= 0) st.events.push({t:"sfx", name:"kill"});
     }
+  } else if(mech.kind === "autohit"){
+    const target = st.monsters[targetIdx];
+    if(!target || target.hp <= 0) return st;
+    let parts;
+    if(mech.missile){
+      const darts = 3 + (slotLevel > 1 ? slotLevel - 1 : 0);
+      parts = [{ label:`${darts} force darts`, type:"force", dice:[{n:darts, d:4}], mod:darts }];
+    } else {
+      parts = upcastParts(mech.parts);
+    }
+    const dmg = damageRoll({ label:`${lbl} damage`, parts });
+    target.hp = Math.max(0, target.hp - dmg.total);
+    st.events.push({t:"sfx", name:"spell-hit"}, {t:"roll", res:dmg},
+      {t:"log", text:`${lbl} strikes unerringly — ${target.name} takes ${dmg.total} damage${target.hp <= 0 ? " and falls!" : ""}.`});
+    if(target.hp <= 0) st.events.push({t:"sfx", name:"kill"});
   } else if(mech.kind === "save"){
     const dc = C.spellSaveDC(ch) || 10;
     // AoE save spells hit every living monster; single-target ones hit the chosen target.

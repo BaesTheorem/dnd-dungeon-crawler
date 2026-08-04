@@ -211,6 +211,30 @@ test("wizard spellcasting derived", () => {
   assert.ok(list.some(e => e.name === "Fire Bolt"));
 });
 
+test("Magic Missile auto-hits: no attack roll, three darts, +1 dart per upcast level", () => {
+  const mech = spellMechanics("Magic Missile", 1);
+  assert.equal(mech.kind, "autohit");
+  const ch = makeWizard();
+  ch.spells.slots = { 1:{max:4, cur:4}, 2:{max:2, cur:2} };
+  const st = startCombat(ch, [materializeMonster(getMonster("Goblin"))]);
+  st.phase = "player"; st.actionsLeft = 1;
+  st.monsters[0].hp = st.monsters[0].maxHP = 999;
+  st.events.length = 0;
+  playerCastSpell(st, ch, "Magic Missile", 1, 0);
+  assert.ok(!st.events.some(e => e.t === "roll" && e.res.kind === "d20"), "no d20 rolled");
+  const dmg = st.events.find(e => e.t === "roll" && e.res.kind === "dmg");
+  assert.ok(dmg, "damage applied directly");
+  assert.equal(dmg.res.parts[0].rolls.length, 3, "three darts at base level");
+  assert.ok(dmg.res.total >= 6 && dmg.res.total <= 15, "3d4+3 range");
+  assert.equal(ch.spells.slots[1].cur, 3, "slot spent");
+  // upcast at 2nd level: four darts
+  st.actionsLeft = 1; st.events.length = 0;
+  playerCastSpell(st, ch, "Magic Missile", 2, 0);
+  const dmg2 = st.events.find(e => e.t === "roll" && e.res.kind === "dmg");
+  assert.equal(dmg2.res.parts[0].rolls.length, 4, "four darts from a 2nd-level slot");
+  assert.equal(ch.spells.slots[2].cur, 1);
+});
+
 test("spell mechanics derivation", () => {
   assert.equal(spellMechanics("Fire Bolt", 1).kind, "attack");
   assert.equal(spellMechanics("Fire Bolt", 5).parts[0].dice[0].n, 2);   // cantrip scales at 5

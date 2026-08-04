@@ -139,6 +139,8 @@ export function spellMechanics(name, charLevel = 1){
     const [n, d] = heal[1].split("d").map(Number);
     return { kind:"heal", spell:s, heal:{dice:[{n, d}], addMod: !!heal[2]}, upcast: upcastInfo(s) };
   }
+  if(key === "magic missile")                             // three unerring darts, +1 per slot level above 1st
+    return { kind:"autohit", spell:s, missile:true };
   const dmgParts = spellDamageParts(s, charLevel);
   const save = /must\s+(?:make|succeed on)\s+a\s+(?:DC\s*\d+\s+)?(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)\s+saving throw/i.exec(s.text || "");
   const condM = /(?:is|be(?:comes)?)\s+(blinded|charmed|deafened|frightened|paralyzed|petrified|poisoned|prone|restrained|stunned|unconscious)/i.exec(s.text || "");
@@ -148,7 +150,8 @@ export function spellMechanics(name, charLevel = 1){
     return { kind:"save", spell:s, save: save[1].slice(0,3).toLowerCase(), parts:dmgParts || null,
       halfOnSave:/half as much/i.test(s.text || ""), condition: condM ? condM[1].toLowerCase() : null,
       conc: !!s.conc, upcast: upcastInfo(s) };
-  if(dmgParts) return { kind:"attack", spell:s, parts:dmgParts, upcast: upcastInfo(s) };
+  // Damaging, no attack roll, no save (Magic Missile's cousins): the spell simply hits.
+  if(dmgParts) return { kind:"autohit", spell:s, parts:dmgParts, upcast: upcastInfo(s) };
   return { kind:"utility", spell:s };
 }
 
