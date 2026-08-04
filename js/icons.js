@@ -36,6 +36,7 @@ const P = {
   crown: '<path d="M4 18h16M4 18L3 9l5 3 4-6 4 6 5-3-1 9z"/>',
   trophy: '<path d="M8 4h8v6a4 4 0 01-8 0z"/><path d="M8 5H4a4 4 0 004 5M16 5h4a4 4 0 01-4 5M12 14v4M8 21h8M10 18h4"/>',
   stairs: '<path d="M4 20h4v-4h4v-4h4V8h4"/>',
+  restart: '<path d="M20 12a8 8 0 11-2.34-5.66"/><path d="M20 3v4.5h-4.5"/>',
 };
 
 export function icon(name, size = 18){

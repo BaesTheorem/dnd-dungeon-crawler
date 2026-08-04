@@ -95,6 +95,13 @@ function renderRoster(){
         dead ? h("div", {class:"dead"}, "☠ Fell in the dark") :
           run && run.status === "active" ? h("div", {class:"meta"}, `In the dungeon — floor ${run.floor}, room ${run.roomIndex}`) :
           h("div", {class:"meta"}, "At the surface")),
+      !dead && run && run.status === "active"
+        ? h("button", {class:"iconbtn", title:"Abandon run", onclick: () => {
+            if(confirmDialog(`Abandon the current run (floor ${run.floor})? ${ch.name} returns to the surface fully rested; the next descent starts at floor 1.`)){
+              restartRun(ch);
+            }
+          }}, icon("restart", 16))
+        : null,
       dead
         ? h("button", {class:"iconbtn", onclick: () => { if(confirmDialog(`Lay ${ch.name} to rest (delete)?`)){ deleteCharacter(ch.id); renderRoster(); } }}, icon("grave", 16))
         : h("button", {class:"iconbtn", onclick: () => { if(confirmDialog(`Delete ${ch.name}? This cannot be undone.`)){ deleteCharacter(ch.id); renderRoster(); } }}, icon("x", 16))));
@@ -136,6 +143,19 @@ function settingsCard(){
 function onCharacterBuilt(ch){
   S.current = ch;
   S.chars.unshift(ch);
+  saveNow();
+  enterGame(ch);
+}
+
+/* Abandon the current run: the hero climbs out, rests fully, and the next descent starts at floor 1. */
+function restartRun(ch, { revive = false } = {}){
+  if(revive) ch.status = "alive";
+  ch.conditions = [];
+  ch.deathSaves = {s:0, f:0};
+  ch.exhaustion = 0;
+  C.longRest(ch);
+  clearRun(ch.id);
+  S.current = ch;
   saveNow();
   enterGame(ch);
 }
@@ -199,6 +219,12 @@ function renderCorridor(){
     if(castable.length) bar.append(h("button", {class:"btn", onclick: castBar}, icon("sparkle"), "Cast a spell"));
     bar.append(h("button", {class:"btn", onclick: () => openSheet(ch)}, icon("scroll"), "Character sheet"));
     bar.append(h("button", {class:"btn", onclick: () => { saveNow(); renderRoster(); showScreen("screen-roster"); }}, icon("arrowUp"), "Retreat to the surface"));
+    bar.append(h("button", {class:"btn", onclick: () => {
+      if(confirmDialog(`Abandon this run (floor ${run.floor})? You return to the surface fully rested and start over at floor 1. XP, gold, and loot are kept.`)){
+        sfx("stairs");
+        restartRun(ch);
+      }
+    }}, icon("restart"), "Abandon run — start over"));
   };
   const castBar = () => {
     clear(bar);
@@ -535,7 +561,11 @@ function renderDeath(){
       h("div", {class:"sheetrow"}, h("span", {class:"k"}, "Monsters slain"), h("span", {class:"v"}, run ? run.kills : 0)),
       h("div", {class:"sheetrow"}, h("span", {class:"k"}, "XP earned"), h("span", {class:"v"}, run ? run.xpEarned : 0)),
       h("div", {class:"sheetrow"}, h("span", {class:"k"}, "Gold at death"), h("span", {class:"v"}, ch.equipment.gold + " gp"))),
-    h("button", {class:"btn primary", onclick: () => { clearRun(ch.id); saveNow(); renderRoster(); showScreen("screen-roster"); }}, "Return to the roster"));
+    h("button", {class:"btn primary", onclick: () => { sfx("level-up"); restartRun(ch, { revive:true }); }},
+      icon("restart"), "Rise again — restart from floor 1"),
+    h("p", {class:"muted center"}, "Your hero wakes at the surface, fully rested, keeping XP, gold, and loot."),
+    h("button", {class:"btn", onclick: () => { clearRun(ch.id); saveNow(); renderRoster(); showScreen("screen-roster"); }},
+      icon("grave"), "Accept death — return to the roster"));
   if(run) run.status = "dead";
   saveNow();
 }
