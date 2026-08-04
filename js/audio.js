@@ -65,6 +65,7 @@ export function initAudio(){
   musicGain = ctx.createGain(); musicGain.gain.value = prefs.music ? prefs.musicVol : 0; musicGain.connect(ctx.destination);
   if(ctx.state !== "running") ctx.resume().catch(() => {});
   ctx.onstatechange = () => { if(ctx.state === "running" && _wantMusic && !musicRunning()) startMusic(_wantMusic); };
+  if(prefs.music) warmAll();                              // start caching all tracks from the first unlock
   if(_wantMusic) startMusic(_wantMusic);
 }
 export function audioReady(){ return !!ctx && ctx.state !== "suspended"; }
@@ -191,11 +192,29 @@ function scheduleChord(mode, when, chordIdx){
 
 function ensureMusic(){ if(_wantMusic && !_music) startMusic(_wantMusic); }
 
-/* Mode switches are GAPLESS-ish and never cut to silence: the outgoing track keeps playing until
-   the incoming one has actually started (matters on first play, when a track is still
-   downloading). A switch to the already-playing track is a strict no-op — no restart. */
+/* Mode switches are GAPLESS-ish and never cut to silence OR stutter: the outgoing track keeps
+   playing until the incoming one is buffered enough to play through (canplaythrough), not merely
+   started — starting a still-streaming MP3 stalls and retries, which sounds like a hung loop.
+   A switch to the already-playing track is a strict no-op — no restart. */
 let _switchId = 0;
 let _warmed = false;
+let _pendingEff = null;
+
+/* Resolve when the element can sustain playback: readyState, canplaythrough, or a capped wait. */
+function whenPlayable(el){
+  return new Promise(res => {
+    if(el.readyState >= 3) return res();                  // HAVE_FUTURE_DATA — good enough
+    let done = false, settle = null;
+    const finish = () => { if(done) return; done = true;
+      el.removeEventListener("canplaythrough", finish);
+      el.removeEventListener("canplay", onCanplay);
+      clearTimeout(cap); clearTimeout(settle); res(); };
+    const onCanplay = () => { settle = setTimeout(finish, 2000); };  // canplay + settle, if canplaythrough never fires
+    el.addEventListener("canplaythrough", finish);
+    el.addEventListener("canplay", onCanplay);
+    const cap = setTimeout(finish, 12000);                // don't wait forever on a slow link
+  });
+}
 
 function getTrack(eff){
   let rec = _trackEls[eff];
@@ -213,12 +232,16 @@ function getTrack(eff){
   return rec;
 }
 
-/* After the first successful play, pull the remaining tracks through the service worker in the
-   background (staggered) so every later switch starts instantly and works offline. */
+/* Pull every track through the service worker SEQUENTIALLY (so the downloads don't fight the
+   track that's currently streaming) starting at first audio unlock — after this, every switch
+   is instant and offline-safe. */
 function warmAll(){
   if(_warmed) return;
   _warmed = true;
-  Object.values(MUSIC_FILES).forEach((f, i) => setTimeout(() => { try{ fetch(f).catch(() => {}); }catch(e){} }, 2000 * (i + 1)));
+  const files = Object.values(MUSIC_FILES);
+  (async () => {
+    for(const f of files){ try{ await fetch(f); }catch(e){} }
+  })();
 }
 
 export function startMusic(mode){
@@ -226,24 +249,29 @@ export function startMusic(mode){
   if(!ctx || !prefs.music) return;
   const eff = (prefs.track && prefs.track !== "auto") ? prefs.track : mode;    // picker lock
   if(_music && _music.kind === "track" && _music.eff === eff){ _music.mode = mode; return; }
+  if(_pendingEff === eff) return;                         // that switch is already buffering
   const file = MUSIC_FILES[eff];
   if(!file) return startGenMusic(mode);
   const rec = getTrack(eff);
   const id = ++_switchId;
-  rec.el.play().then(() => {
-    if(id !== _switchId){                                 // superseded by a newer switch
-      if(!_music || _music.eff !== eff) rec.el.pause();
-      return;
-    }
-    const prev = _music;
-    _music = { mode, eff, kind:"track" };
-    if(prev){
-      if(prev.kind === "gen") clearInterval(prev.timer);
-      else if(prev.eff !== eff){ const p = _trackEls[prev.eff]; if(p) p.el.pause(); }
-    }
-    warmAll();
+  _pendingEff = eff;
+  whenPlayable(rec.el).then(() => {
+    if(id !== _switchId) return;
+    return rec.el.play().then(() => {
+      if(id !== _switchId){                               // superseded by a newer switch
+        if(!_music || _music.eff !== eff) rec.el.pause();
+        return;
+      }
+      const prev = _music;
+      _music = { mode, eff, kind:"track" };
+      _pendingEff = null;
+      if(prev){
+        if(prev.kind === "gen") clearInterval(prev.timer);
+        else if(prev.eff !== eff){ const p = _trackEls[prev.eff]; if(p) p.el.pause(); }
+      }
+    });
   }).catch(() => {
-    if(id === _switchId && !_music) startGenMusic(mode);  // nothing else playing — fall back
+    if(id === _switchId){ _pendingEff = null; if(!_music) startGenMusic(mode); }
   });
 }
 
@@ -264,6 +292,7 @@ function startGenMusic(mode){
 }
 function stopMusicNow(){
   _switchId++;                                            // invalidate any in-flight switch
+  _pendingEff = null;
   if(!_music) return;
   if(_music.kind === "gen") clearInterval(_music.timer);
   else { const rec = _trackEls[_music.eff]; if(rec) rec.el.pause(); }
