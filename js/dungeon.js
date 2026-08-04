@@ -85,17 +85,34 @@ function buildBoss(){
 }
 
 /* ---- Room generation (materialized + persisted) ---- */
+function chooseRoomType(run, idx){
+  if(idx >= ROOMS_PER_FLOOR) return (run.floor >= FLOORS) ? "boss" : "stairs";
+  if(idx === ROOMS_PER_FLOOR - 1 && !run.restRoomSeenThisFloor) return "rest";   // guarantee a rest per floor
+  return weightedPick(ROOM_WEIGHTS);
+}
+
+/* Detect Magic (ritual): pre-rolls and reveals the next room's nature; nextRoom then honors it. */
+export function peekNextRoom(run, ch){
+  const events = [];
+  if(!run.peekType) run.peekType = chooseRoomType(run, run.roomIndex + 1);
+  const senses = {
+    combat:"Aggression. Something breathing waits beyond the next door.",
+    trap:"A thin lattice of hostile intent — mechanism or glyph. Careful.",
+    treasure:"A warm shimmer of enchantment and precious metal ahead.",
+    rest:"Still air and old ash. A safe place to breathe, you think.",
+    event:"Something strange and old hums beyond the door.",
+    stairs:"A downward draft — the way deeper is close, and it is guarded.",
+    boss:"A pressure like a storm-front. Something terrible is very near.",
+  };
+  events.push({t:"sfx", name:"spell"}, {t:"log", text:`Detect Magic (ritual): ${senses[run.peekType] || "The weave is murky here."}`});
+  return { events };
+}
+
 export function nextRoom(run, ch){
   run.roomIndex += 1;
   const floor = run.floor;
-  let type;
-  if(run.roomIndex >= ROOMS_PER_FLOOR){
-    type = (floor >= FLOORS) ? "boss" : "stairs";
-  } else if(run.roomIndex === ROOMS_PER_FLOOR - 1 && !run.restRoomSeenThisFloor){
-    type = "rest";                                       // guarantee at least one rest per floor
-  } else {
-    type = weightedPick(ROOM_WEIGHTS);
-  }
+  const type = run.peekType || chooseRoomType(run, run.roomIndex);
+  run.peekType = null;
   if(type === "rest") run.restRoomSeenThisFloor = true;
 
   const tune = FLOOR_TUNING[floor - 1];
@@ -326,11 +343,15 @@ export function castableOutOfCombat(ch){
   const out = [];
   (ch.spells.known || []).forEach(n => {
     const mech = spellMechanics(n, ch.level);
-    if(!mech || !hasSlotFor(ch, mech.spell.level)) return;
+    if(!mech) return;
+    const ritual = !!mech.spell.ritual;                   // rituals need time, not slots — free out of combat
+    if(!ritual && !hasSlotFor(ch, mech.spell.level)) return;
     const key = n.toLowerCase();
     if(mech.kind === "heal" || mech.buff === "mageArmor"){ out.push({ n, mech }); return; }
     if(key === "find familiar" && !(ch.familiar && ch.familiar.alive))
-      out.push({ n, mech, opt:"summon", label:"Find Familiar — summon your owl (L1)" });
+      out.push({ n, mech, opt:"summon", label:"Find Familiar — summon your owl (ritual, no slot)" });
+    if(key === "detect magic")
+      out.push({ n, mech, opt:"detect", label:"Detect Magic — sense the next room (ritual, no slot)" });
     if(key === "prestidigitation"){
       out.push({ n, mech, opt:"prepare", label:"Prestidigitation — tidy & prepare (+2 on your next check)" });
       out.push({ n, mech, opt:"season", label:"Prestidigitation — season rations (+2 HP per Hit Die next short rest)" });
@@ -339,19 +360,20 @@ export function castableOutOfCombat(ch){
   return out;
 }
 
-export function castUtility(ch, name, opt){
+export function castUtility(ch, name, opt, run){
   const mech = spellMechanics(name, ch.level);
   const events = [];
   if(!mech) return { events };
   const s = mech.spell;
   const key = s.name.toLowerCase();
   let slotLevel = 0;
-  if(s.level > 0){
+  if(s.level > 0 && !s.ritual){                           // ritual casting: ten quiet minutes instead of a slot
     const lvls = Object.keys(ch.spells.slots || {}).map(Number).filter(l => l >= s.level && ch.spells.slots[l].cur > 0);
     if(!lvls.length){ events.push({t:"log", text:"No spell slots left."}); return { events }; }
     slotLevel = Math.min(...lvls);
     ch.spells.slots[slotLevel].cur -= 1;
   }
+  if(key === "detect magic" && run) return peekNextRoom(run, ch);
   if(key === "find familiar"){
     ch.familiar = { form:"Owl", alive:true };
     events.push({t:"sfx", name:"heal"}, {t:"log", text:"A spectral owl takes shape and settles on your shoulder. It scouts for traps, keeps watch while you rest, and can harry foes in battle."});

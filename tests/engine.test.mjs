@@ -13,7 +13,7 @@ import { mod, profBonus, pointBuyTotal, slotsFor, acFrom, levelForXP, xpForCR, a
 import { injectData, idx, monsterAttacks, getMonster, spellMechanics, getWeapon, getArmor, classSpellList } from "../data/data.js";
 import * as C from "../js/character.js";
 import { materializeMonster, startCombat, playerAttack, playerCastSpell, endPlayerTurn, monsterTurn, monsterStep, reactionChoose, castStep, deathSave, combatOver, playerDodge, playerFamiliarHelp, utilityOptions } from "../js/combat.js";
-import { newRun, nextRoom, enterCombat, resolveCombat, trapAct, openChest, shortRest, castUtility, castableOutOfCombat } from "../js/dungeon.js";
+import { newRun, nextRoom, enterCombat, resolveCombat, trapAct, openChest, shortRest, castUtility, castableOutOfCombat, peekNextRoom } from "../js/dungeon.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const blob = JSON.parse(readFileSync(join(here, "..", "data", "source-data.json"), "utf8"));
@@ -521,7 +521,7 @@ test("Find Familiar summons an owl; Help grants advantage once per round", () =>
   ch.spells.known.push("Find Familiar");
   const r = castUtility(ch, "Find Familiar", "summon");
   assert.ok(ch.familiar && ch.familiar.alive, "owl summoned out of combat");
-  assert.equal(ch.spells.slots[1].cur, ch.spells.slots[1].max - 1, "slot spent");
+  assert.equal(ch.spells.slots[1].cur, ch.spells.slots[1].max, "ritual casting: no slot spent out of combat");
   const st = startCombat(ch, [materializeMonster(getMonster("Goblin"))]);
   st.phase = "player"; st.actionsLeft = 1; st.helpUsed = false;
   playerFamiliarHelp(st, ch);
@@ -570,6 +570,24 @@ test("Prestidigitation: sparks buff your next attack; prepare/season work out of
   assert.ok(ch.effects.some(b => b.buff === "rations"));
   const list = castableOutOfCombat(ch);
   assert.equal(list.filter(x => x.n === "Prestidigitation").length, 2, "two out-of-combat tricks listed");
+});
+
+test("ritual casting: rituals cost no slot out of combat and stay listed at zero slots", () => {
+  const ch = makeWizard();
+  ch.spells.known.push("Detect Magic", "Find Familiar");
+  ch.spells.slots[1].cur = 0;                             // out of slots entirely
+  const list = castableOutOfCombat(ch);
+  assert.ok(list.some(x => x.n === "Detect Magic"), "ritual castable with no slots left");
+  assert.ok(list.some(x => x.n === "Find Familiar"));
+  const run = newRun(ch);
+  const r = castUtility(ch, "Detect Magic", "detect", run);
+  assert.ok(run.peekType, "Detect Magic pre-rolls the next room");
+  assert.ok(r.events.some(e => e.t === "log" && /Detect Magic/.test(e.text)));
+  assert.equal(ch.spells.slots[1].cur, 0, "still no slot spent");
+  const peeked = run.peekType;
+  nextRoom(run, ch);
+  assert.equal(run.room.type, peeked, "the door honors the reading");
+  assert.equal(run.peekType, null, "peek consumed");
 });
 
 test("generic utility fallback: no castable spell is a dead button", () => {

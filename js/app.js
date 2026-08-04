@@ -254,7 +254,7 @@ function renderCorridor(){
       const s = mech.spell;
       const already = mech.buff === "mageArmor" && (ch.effects || []).some(b => b.buff === "mageArmor");
       bar.append(h("button", {class:"btn primary", disabled: already ? "" : null, onclick: () => {
-        const r = D.castUtility(ch, n, opt);
+        const r = D.castUtility(ch, n, opt, S.run);
         r.events.forEach(e => { if(e.t === "sfx") sfx(e.name); });
         renderEvents(logEl(), r.events);
         queueSave();
