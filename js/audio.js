@@ -6,7 +6,7 @@ import { getJSON, setJSON } from "./storage.js";
 
 let ctx = null;
 let sfxGain = null, musicGain = null;
-let prefs = { sfx: true, music: true, sfxVol: 0.7, musicVol: 0.35 };
+let prefs = { sfx: true, music: true, sfxVol: 0.7, musicVol: 0.35, track: "auto" };
 
 export function loadAudioPrefs(){
   const p = getJSON("prefs", {});
@@ -24,6 +24,7 @@ export function setAudioPref(key, val){
   if(musicGain) musicGain.gain.value = prefs.music ? prefs.musicVol : 0;
   if(sfxGain) sfxGain.gain.value = prefs.sfx ? prefs.sfxVol : 0;
   if(key === "music" || key === "musicVol"){ if(prefs.music) ensureMusic(); }
+  if(key === "track" && prefs.music && ctx && _wantMusic) startMusic(_wantMusic);   // re-evaluate the lock; same track = no-op
 }
 
 /* iOS quirks handled here:
@@ -135,7 +136,8 @@ export function audioDebug(){
     context: ctx ? ctx.state : "not created (tap anywhere first)",
     soundsPlayed: _played,
     silentUnlock: _silentEl ? (_silentEl.paused ? "paused" : "playing") : "not started",
-    music: _music ? _music.mode : "off",
+    music: _music ? (_music.eff || _music.mode) : "off",
+    trackPref: prefs.track,
     sfxOn: prefs.sfx, musicOn: prefs.music,
   };
 }
@@ -189,29 +191,60 @@ function scheduleChord(mode, when, chordIdx){
 
 function ensureMusic(){ if(_wantMusic && !_music) startMusic(_wantMusic); }
 
+/* Mode switches are GAPLESS-ish and never cut to silence: the outgoing track keeps playing until
+   the incoming one has actually started (matters on first play, when a track is still
+   downloading). A switch to the already-playing track is a strict no-op — no restart. */
+let _switchId = 0;
+let _warmed = false;
+
+function getTrack(eff){
+  let rec = _trackEls[eff];
+  if(rec) return rec;
+  const el = new Audio(MUSIC_FILES[eff]);
+  el.loop = true;
+  el.preload = "auto";
+  el.setAttribute("playsinline", "");
+  let node = null;
+  try{ node = ctx.createMediaElementSource(el); node.connect(musicGain); }catch(e){}
+  rec = _trackEls[eff] = { el, node };
+  el.addEventListener("error", () => {
+    if(_music && _music.kind === "track" && _music.eff === eff) startGenMusic(_music.mode);
+  });
+  return rec;
+}
+
+/* After the first successful play, pull the remaining tracks through the service worker in the
+   background (staggered) so every later switch starts instantly and works offline. */
+function warmAll(){
+  if(_warmed) return;
+  _warmed = true;
+  Object.values(MUSIC_FILES).forEach((f, i) => setTimeout(() => { try{ fetch(f).catch(() => {}); }catch(e){} }, 2000 * (i + 1)));
+}
+
 export function startMusic(mode){
   _wantMusic = mode;
   if(!ctx || !prefs.music) return;
-  if(_music && _music.mode === mode) return;
-  stopMusicNow();
-  const file = MUSIC_FILES[mode];
-  if(file){
-    let rec = _trackEls[mode];
-    if(!rec){
-      const el = new Audio(file);
-      el.loop = true;
-      el.preload = "auto";
-      el.setAttribute("playsinline", "");
-      let node = null;
-      try{ node = ctx.createMediaElementSource(el); node.connect(musicGain); }catch(e){}
-      rec = _trackEls[mode] = { el, node };
-      el.addEventListener("error", () => { if(_wantMusic === mode && _music && _music.kind === "track") startGenMusic(mode); });
+  const eff = (prefs.track && prefs.track !== "auto") ? prefs.track : mode;    // picker lock
+  if(_music && _music.kind === "track" && _music.eff === eff){ _music.mode = mode; return; }
+  const file = MUSIC_FILES[eff];
+  if(!file) return startGenMusic(mode);
+  const rec = getTrack(eff);
+  const id = ++_switchId;
+  rec.el.play().then(() => {
+    if(id !== _switchId){                                 // superseded by a newer switch
+      if(!_music || _music.eff !== eff) rec.el.pause();
+      return;
     }
-    _music = { mode, kind:"track" };
-    rec.el.play().catch(() => { if(_wantMusic === mode) startGenMusic(mode); });
-    return;
-  }
-  startGenMusic(mode);
+    const prev = _music;
+    _music = { mode, eff, kind:"track" };
+    if(prev){
+      if(prev.kind === "gen") clearInterval(prev.timer);
+      else if(prev.eff !== eff){ const p = _trackEls[prev.eff]; if(p) p.el.pause(); }
+    }
+    warmAll();
+  }).catch(() => {
+    if(id === _switchId && !_music) startGenMusic(mode);  // nothing else playing — fall back
+  });
 }
 
 function startGenMusic(mode){
@@ -230,9 +263,10 @@ function startGenMusic(mode){
   _music = { mode, kind:"gen", timer };
 }
 function stopMusicNow(){
+  _switchId++;                                            // invalidate any in-flight switch
   if(!_music) return;
   if(_music.kind === "gen") clearInterval(_music.timer);
-  else { const rec = _trackEls[_music.mode]; if(rec) rec.el.pause(); }
+  else { const rec = _trackEls[_music.eff]; if(rec) rec.el.pause(); }
   _music = null;
 }
 export function stopMusic(){ _wantMusic = null; stopMusicNow(); }

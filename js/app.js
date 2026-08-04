@@ -152,6 +152,13 @@ function settingsCard(){
         prefs.light = document.body.classList.contains("light");
         setJSON("prefs", { ...getJSON("prefs", {}), light: prefs.light });
       }}, icon("moon", 16), "Theme")),
+    p.music ? h("div", {},
+      h("label", {}, "Music track"),
+      h("div", {class:"btnrow"},
+        ...[["auto","Auto"],["town","Feast"],["dungeon","Ossuary"],["combat","Chasm"],["boss","Armies"]].map(([k, lbl]) =>
+          h("button", {class:"btn small" + ((p.track || "auto") === k ? " primary" : ""),
+            onclick: () => { setAudioPref("track", k); renderRoster(); }}, lbl))),
+      h("p", {class:"muted", style:"margin-top:2px"}, "Auto matches the music to the scene; picking a track plays it everywhere.")) : null,
     h("p", {class:"muted"}, `v${VERSION} · offline-ready · your heroes live in this device's browser storage`));
 }
 
