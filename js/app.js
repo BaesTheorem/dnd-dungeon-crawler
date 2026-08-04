@@ -113,6 +113,24 @@ function renderRoster(){
           }}, icon("restart", 16))
         : null,
       dead
+        ? h("button", {class:"iconbtn", title:"Resurrect", onclick: () => {
+            const tithe = Math.floor(ch.equipment.gold / 2);
+            if(confirmDialog(`Carry ${ch.name} to the temple for resurrection? The clergy take half your gold as tithe (${tithe} gp).`)){
+              ch.equipment.gold -= tithe;
+              ch.status = "alive";
+              ch.conditions = [];
+              ch.deathSaves = {s:0, f:0};
+              ch.exhaustion = 0;
+              C.longRest(ch);
+              clearRun(ch.id);
+              S.current = ch;
+              saveNow();
+              sfx("level-up");
+              renderRoster();
+            }
+          }}, icon("sun", 16))
+        : null,
+      dead
         ? h("button", {class:"iconbtn", onclick: () => { if(confirmDialog(`Lay ${ch.name} to rest (delete)?`)){ deleteCharacter(ch.id); renderRoster(); } }}, icon("grave", 16))
         : h("button", {class:"iconbtn", onclick: () => { if(confirmDialog(`Delete ${ch.name}? This cannot be undone.`)){ deleteCharacter(ch.id); renderRoster(); } }}, icon("x", 16))));
   });
