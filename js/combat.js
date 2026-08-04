@@ -21,6 +21,7 @@ export function materializeMonster(mon, tag = ""){
     intMod: Math.floor(((mon.int || 10) - 10) / 2),
     wisMod: Math.floor(((mon.wis || 10) - 10) / 2),
     cr: mon.cr, crNum: mon.crNum,
+    type: mon.type || "", condImmune: mon.condImmune || "",
     attacks: monsterAttacks(mon), multi: monsterHasMultiattack(mon),
     conditions: [],                       // [{k, save:{abil,dc}|null, rounds}]
     recharge: {},                         // attackName -> ready:boolean
@@ -87,6 +88,15 @@ function advAgainstTarget(targetConds, melee, targetDodge){
 }
 function autoCritVs(targetConds, melee){
   return melee && ["paralyzed","unconscious"].some(c => targetConds.includes(c));
+}
+
+/* Damage wakes a sleeper (after the triggering hit lands with its advantage/auto-crit). */
+function wakeIfDamaged(st, target, dealt){
+  if(dealt <= 0 || target.hp <= 0) return;
+  const before = target.conditions.length;
+  target.conditions = target.conditions.filter(c => c.k !== "unconscious");
+  if(target.conditions.length < before)
+    st.events.push({t:"log", text:`${target.name} jolts awake!`});
 }
 
 function blessBonus(st){
@@ -175,6 +185,7 @@ export function playerAttack(st, ch, weaponName, targetIdx){
     st.events.push({t:"sfx", name: crit ? "crit" : "hit"}, {t:"roll", res:dmg},
       {t:"log", text:`${crit ? "CRITICAL! " : ""}${target.name} takes ${dmg.total} damage${target.hp <= 0 ? " and falls!" : ` (${target.hp}/${target.maxHP})`}.`});
     if(target.hp <= 0) st.events.push({t:"sfx", name:"kill"});
+    wakeIfDamaged(st, target, dmg.total);
   }
   checkVictory(st, ch);
   return st;
@@ -245,7 +256,30 @@ export function playerCastSpell(st, ch, spellName, slotLevel, targetIdx, opt, fr
       st.events.push({t:"sfx", name: crit ? "crit" : "spell-hit"}, {t:"roll", res:dmg},
         {t:"log", text:`${crit ? "CRITICAL! " : ""}${target.name} takes ${dmg.total} damage${target.hp <= 0 ? " and falls!" : ""}.`});
       if(target.hp <= 0) st.events.push({t:"sfx", name:"kill"});
+      wakeIfDamaged(st, target, dmg.total);
     }
+  } else if(mech.kind === "sleep"){
+    // Roll the slumber pool: 5d8, +2d8 per slot level above 1st. Weakest current HP first;
+    // a creature sleeps only if its HP fits in what remains. Undead and the charm-proof shrug it off.
+    const dice = 5 + (slotLevel > 1 ? 2 * (slotLevel - 1) : 0);
+    const poolRoll = damageRoll({ label:`${lbl} — slumber pool`, rollType:"Sleep", parts:[{label:"HP of creatures", type:"", dice:[{n:dice, d:8}], mod:0}] });
+    st.events.push({t:"roll", res:poolRoll});
+    let remaining = poolRoll.total;
+    const candidates = livingMonsters(st)
+      .filter(m => !m.conditions.some(c => c.k === "unconscious"))
+      .sort((a, b) => a.hp - b.hp);
+    let any = false;
+    for(const target of candidates){
+      const immune = /undead|construct/i.test(target.type || target.flavor || "") ||
+        /unconscious|charmed/i.test(target.condImmune || "");
+      if(immune){ st.events.push({t:"log", text:`${target.name} cannot sleep.`}); continue; }
+      if(target.hp > remaining) continue;
+      remaining -= target.hp;
+      target.conditions.push({ k:"unconscious", save:null, rounds:10, sleep:true });
+      any = true;
+      st.events.push({t:"sfx", name:"spell"}, {t:"log", text:`${target.name} slumps into magical slumber! (Attacks against it have advantage; melee hits crit — but damage wakes it.)`});
+    }
+    if(!any) st.events.push({t:"log", text:`The slumber washes over them without taking hold (${poolRoll.total} HP was not enough).`});
   } else if(mech.kind === "autohit"){
     const target = st.monsters[targetIdx];
     if(!target || target.hp <= 0) return st;
@@ -261,6 +295,7 @@ export function playerCastSpell(st, ch, spellName, slotLevel, targetIdx, opt, fr
     st.events.push({t:"sfx", name:"spell-hit"}, {t:"roll", res:dmg},
       {t:"log", text:`${lbl} strikes unerringly — ${target.name} takes ${dmg.total} damage${target.hp <= 0 ? " and falls!" : ""}.`});
     if(target.hp <= 0) st.events.push({t:"sfx", name:"kill"});
+    wakeIfDamaged(st, target, dmg.total);
   } else if(mech.kind === "save"){
     const dc = C.spellSaveDC(ch) || 10;
     // AoE save spells hit every living monster; single-target ones hit the chosen target.
@@ -652,6 +687,7 @@ function applyCastOutcome(st, ch, ctx, failed){
     st.events.push({t:"roll", res:dmg}, {t:"sfx", name: dealt ? "spell-hit" : "miss"},
       {t:"log", text:`${target.name} ${failed ? "fails" : "saves"} (DC ${ctx.dc}) — takes ${dealt} damage${target.hp <= 0 ? " and falls!" : ""}.`});
     if(target.hp <= 0) st.events.push({t:"sfx", name:"kill"});
+    wakeIfDamaged(st, target, dealt);
   }
   if(failed && ctx.condition){
     target.conditions.push({ k:ctx.condition, save:{abil:ctx.save, dc:ctx.dc}, rounds:10 });

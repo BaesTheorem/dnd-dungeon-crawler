@@ -235,6 +235,31 @@ test("Magic Missile auto-hits: no attack roll, three darts, +1 dart per upcast l
   assert.equal(ch.spells.slots[2].cur, 1);
 });
 
+test("Sleep: slumber pool drops the weakest first, undead shrug it off, damage wakes", () => {
+  assert.equal(spellMechanics("Sleep", 1).kind, "sleep");
+  const ch = makeWizard();
+  ch.spells.known.push("Sleep");
+  const gob = materializeMonster(getMonster("Goblin"));
+  const zom = materializeMonster(getMonster("Zombie"));
+  const st = startCombat(ch, [gob, zom]);
+  st.phase = "player"; st.actionsLeft = 1;
+  st.monsters[0].hp = 3;                                  // goblin fits any 5d8 roll (min 5)
+  st.monsters[1].hp = 2;                                  // zombie is weakest but undead — immune
+  playerCastSpell(st, ch, "Sleep", 1, 0);
+  assert.ok(st.monsters[0].conditions.some(c => c.k === "unconscious"), "goblin sleeps");
+  assert.ok(!st.monsters[1].conditions.some(c => c.k === "unconscious"), "undead cannot sleep");
+  assert.equal(st.monsters[0].hp, 3, "sleep deals no damage");
+  // attacking the sleeper: advantage + melee auto-crit, then it wakes (if it survives)
+  st.actionsLeft = 1; st.attacksLeft = 0;
+  st.monsters[0].hp = 500; st.monsters[0].maxHP = 500;
+  st.events.length = 0;
+  playerAttack(st, ch, "Dagger", 0);
+  const atk = st.events.find(e => e.t === "roll" && e.res.rt === "Attack");
+  assert.equal(atk.res.adv, "adv", "advantage against the sleeper");
+  if(st.events.some(e => e.t === "roll" && e.res.kind === "dmg"))
+    assert.ok(!st.monsters[0].conditions.some(c => c.k === "unconscious"), "damage wakes it");
+});
+
 test("spell mechanics derivation", () => {
   assert.equal(spellMechanics("Fire Bolt", 1).kind, "attack");
   assert.equal(spellMechanics("Fire Bolt", 5).parts[0].dice[0].n, 2);   // cantrip scales at 5

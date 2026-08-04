@@ -141,6 +141,8 @@ export function spellMechanics(name, charLevel = 1){
   }
   if(key === "magic missile")                             // three unerring darts, +1 per slot level above 1st
     return { kind:"autohit", spell:s, missile:true };
+  if(key === "sleep")                                     // 5d8-HP slumber pool, weakest first, no save
+    return { kind:"sleep", spell:s };
   const dmgParts = spellDamageParts(s, charLevel);
   const save = /must\s+(?:make|succeed on)\s+a\s+(?:DC\s*\d+\s+)?(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)\s+saving throw/i.exec(s.text || "");
   const condM = /(?:is|be(?:comes)?)\s+(blinded|charmed|deafened|frightened|paralyzed|petrified|poisoned|prone|restrained|stunned|unconscious)/i.exec(s.text || "");
