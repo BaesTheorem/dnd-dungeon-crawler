@@ -10,11 +10,12 @@ cd "$(git rev-parse --show-toplevel)"
 VER=$(cat VERSION 2>/dev/null || echo "1.0.0")
 MAJ=$(echo "$VER" | cut -d. -f1); MIN=$(echo "$VER" | cut -d. -f2); PAT=$(echo "$VER" | cut -d. -f3)
 NEW="$MAJ.$MIN.$((PAT + 1))"
-N=$(( (MAJ * 0) + MIN * 1000 + PAT + 1 ))
 
 echo "$NEW" > VERSION
 sed -i.bak "s/name=\"app-version\" content=\"[^\"]*\"/name=\"app-version\" content=\"$NEW\"/" index.html && rm -f index.html.bak
-sed -i.bak "s/const CACHE = \"dnd-crawler-v[^\"]*\"/const CACHE = \"dnd-crawler-v$N\"/" sw.js && rm -f sw.js.bak
-printf '{"version":"%s","cache":"dnd-crawler-v%s"}\n' "$NEW" "$N" > version.json
+# The full version string keys the cache: every commit MUST change sw.js or installed
+# PWAs keep serving their old precached modules forever.
+sed -i.bak "s/const CACHE = \"dnd-crawler-v[^\"]*\"/const CACHE = \"dnd-crawler-v$NEW\"/" sw.js && rm -f sw.js.bak
+printf '{"version":"%s","cache":"dnd-crawler-v%s"}\n' "$NEW" "$NEW" > version.json
 
 git add VERSION index.html sw.js version.json
