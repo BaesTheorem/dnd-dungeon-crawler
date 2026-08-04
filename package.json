@@ -1,0 +1,10 @@
+{
+  "name": "dnd-dungeon-crawler",
+  "private": true,
+  "type": "module",
+  "description": "D&D 5e room-by-room dungeon crawler PWA. No build step; this file exists so `node --test tests/` can load the ES modules.",
+  "scripts": {
+    "test": "node --test tests/",
+    "serve": "python3 -m http.server 8000"
+  }
+}
