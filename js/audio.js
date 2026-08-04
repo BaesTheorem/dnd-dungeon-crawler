@@ -119,11 +119,25 @@ const SFX = {
   "stairs":       t => [392, 330, 262].forEach((f, i) => tone(f, "sine", t + i*0.15, 0.02, 0.35, 0.25)),
 };
 
+let _played = 0;
 export function sfx(name){
   if(!ctx || !prefs.sfx) return;
-  if(ctx.state !== "running"){ ctx.resume().catch(() => {}); return; }
   const fn = SFX[name];
-  if(fn) try{ fn(ctx.currentTime + 0.01); }catch(e){}
+  if(!fn) return;
+  const go = () => { try{ fn(ctx.currentTime + 0.01); _played++; }catch(e){} };
+  if(ctx.state !== "running"){ ctx.resume().then(go).catch(() => {}); return; }   // play after resume, don't drop
+  go();
+}
+
+/* Diagnostics for the Settings test button (and window.__audioDebug). */
+export function audioDebug(){
+  return {
+    context: ctx ? ctx.state : "not created (tap anywhere first)",
+    soundsPlayed: _played,
+    silentUnlock: _silentEl ? (_silentEl.paused ? "paused" : "playing") : "not started",
+    music: _music ? _music.mode : "off",
+    sfxOn: prefs.sfx, musicOn: prefs.music,
+  };
 }
 
 /* ---- generative music ----

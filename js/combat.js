@@ -233,27 +233,14 @@ export function playerCastSpell(st, ch, spellName, slotLevel, targetIdx){
     const dc = C.spellSaveDC(ch) || 10;
     // AoE save spells hit every living monster; single-target ones hit the chosen target.
     const aoe = /each creature|all creatures/i.test(s.text || "");
-    const targets = aoe ? livingMonsters(st) : [st.monsters[targetIdx]].filter(m => m && m.hp > 0);
-    targets.forEach(target => {
-      const saveMod = target.dexMod;                    // bestiary blob lacks per-save mods; dex mod is the common case
-      const sv = d20Roll({ label:`${target.name} ${mech.save.toUpperCase()} save`, rollType:"Save", mod:saveMod });
-      st.events.push({t:"roll", res:sv});
-      const failed = sv.total < dc;
-      if(mech.parts){
-        const dmg = damageRoll({ label:`${lbl} damage`, parts: upcastParts(mech.parts) });
-        const dealt = failed ? dmg.total : (mech.halfOnSave ? Math.floor(dmg.total / 2) : 0);
-        target.hp = Math.max(0, target.hp - dealt);
-        st.events.push({t:"roll", res:dmg}, {t:"sfx", name: dealt ? "spell-hit" : "miss"},
-          {t:"log", text:`${target.name} ${failed ? "fails" : "saves"} (DC ${dc}) — takes ${dealt} damage${target.hp <= 0 ? " and falls!" : ""}.`});
-        if(target.hp <= 0) st.events.push({t:"sfx", name:"kill"});
-      }
-      if(failed && mech.condition){
-        target.conditions.push({ k:mech.condition, save:{abil:mech.save, dc}, rounds:10 });
-        st.events.push({t:"log", text:`${target.name} is ${mech.condition}!`});
-      }
-      if(!mech.parts && !failed) st.events.push({t:"log", text:`${target.name} resists ${lbl} (DC ${dc}).`});
-    });
+    const targetIdxs = aoe ? st.monsters.map((m, i) => m.hp > 0 ? i : -1).filter(i => i >= 0)
+                           : [targetIdx].filter(i => st.monsters[i] && st.monsters[i].hp > 0);
+    // Targets resolve through a steppable queue so a monster's save SUCCESS can pause for
+    // a Silvery Barbs reaction (forced reroll) before the outcome lands.
+    st.castQueue = { lbl, dc, save:mech.save, halfOnSave: !!mech.halfOnSave, condition: mech.condition || null,
+      parts: mech.parts ? upcastParts(mech.parts) : null, targets: targetIdxs };
     if(s.conc) st.playerBuffs.push({ buff:"conc-marker", label:`Concentrating: ${s.name}`, conc:true });
+    castStep(st, ch);                                   // first target resolves now; UI steps the rest
   } else {
     st.events.push({t:"log", text:`You cast ${lbl}.`});
   }
@@ -341,6 +328,12 @@ export function playerFlee(st, ch, floor = 1){
 
 export function endPlayerTurn(st, ch){
   if(st.phase !== "player") return st;
+  let guard = 30;                                        // flush any unstepped cast targets / prompts
+  while((st.castQueue || st.pendingReaction) && guard-- > 0){
+    if(st.pendingReaction) reactionChoose(st, ch, "decline");
+    else castStep(st, ch);
+  }
+  if(combatOver(st)) return st;
   st.phase = "monster";
   st.events.push({t:"phase", phase:"monster"});
   return st;
@@ -431,14 +424,16 @@ function attemptSwing(st, ch, mi, m, atk){
     st.events.push({t:"sfx", name:"monster-miss"}, {t:"log", text:`${m.name}'s ${atk.name} misses you.`});
     return;
   }
-  // Reaction window: offer Shield only when +5 AC would turn this hit into a miss (never vs a nat 20);
-  // offer Silvery Barbs on any hit including crits (the reroll can cancel one).
+  // Reaction window: Shield is offered on ANY non-crit hit — even when +5 AC won't stop this one,
+  // it protects against every later attack this round (the UI says which case you're in).
+  // Silvery Barbs is offered on any hit including crits (the reroll can cancel one).
   if(!st.reactionUsed && st.phase === "monster"){
     const options = [];
-    if(knowsSpell(ch, "Shield") && lowestSlot(ch) != null && !crit && res.total < ac + 5) options.push("shield");
+    if(knowsSpell(ch, "Shield") && lowestSlot(ch) != null && !crit) options.push("shield");
     if(knowsSpell(ch, "Silvery Barbs") && lowestSlot(ch) != null) options.push("barbs");
     if(options.length){
-      st.pendingReaction = { mi, atk, res, crit, ac, options };
+      st.pendingReaction = { type:"swing", mi, atk, res, crit, ac, options,
+        deflects: !crit && res.total < ac + 5 };
       st.events.push({t:"log", text:`${m.name}'s ${atk.name} is about to hit you (${res.total} vs AC ${ac})…`});
       return;
     }
@@ -466,11 +461,75 @@ function resolveSwingHit(st, ch, m, atk, res, crit){
   }
 }
 
+/* ---- Save-spell resolution queue (player's own turn) ---- */
+export function castStep(st, ch){
+  const q = st.castQueue;
+  if(!q || st.pendingReaction) return false;
+  const ti = q.targets.shift();
+  if(ti == null){ st.castQueue = null; checkVictory(st, ch); return true; }
+  const target = st.monsters[ti];
+  if(!target || target.hp <= 0){ if(!q.targets.length){ st.castQueue = null; checkVictory(st, ch); } return true; }
+  const sv = d20Roll({ label:`${target.name} ${q.save.toUpperCase()} save`, rollType:"Save", mod:target.dexMod });
+  st.events.push({t:"roll", res:sv});
+  const failed = sv.total < q.dc;
+  const ctx = { type:"save", ti, sv, lbl:q.lbl, dc:q.dc, save:q.save, halfOnSave:q.halfOnSave, condition:q.condition, parts:q.parts };
+  if(!failed && !st.reactionUsed && knowsSpell(ch, "Silvery Barbs") && lowestSlot(ch) != null){
+    st.pendingReaction = { ...ctx, options:["barbs"] };
+    st.events.push({t:"log", text:`${target.name} resists ${q.lbl} (${sv.total} vs DC ${q.dc})…`});
+    return true;
+  }
+  applyCastOutcome(st, ch, ctx, failed);
+  if(!q.targets.length){ st.castQueue = null; checkVictory(st, ch); }
+  return true;
+}
+
+function applyCastOutcome(st, ch, ctx, failed){
+  const target = st.monsters[ctx.ti];
+  if(!target) return;
+  if(ctx.parts){
+    const dmg = damageRoll({ label:`${ctx.lbl} damage`, parts: ctx.parts });
+    const dealt = failed ? dmg.total : (ctx.halfOnSave ? Math.floor(dmg.total / 2) : 0);
+    target.hp = Math.max(0, target.hp - dealt);
+    st.events.push({t:"roll", res:dmg}, {t:"sfx", name: dealt ? "spell-hit" : "miss"},
+      {t:"log", text:`${target.name} ${failed ? "fails" : "saves"} (DC ${ctx.dc}) — takes ${dealt} damage${target.hp <= 0 ? " and falls!" : ""}.`});
+    if(target.hp <= 0) st.events.push({t:"sfx", name:"kill"});
+  }
+  if(failed && ctx.condition){
+    target.conditions.push({ k:ctx.condition, save:{abil:ctx.save, dc:ctx.dc}, rounds:10 });
+    st.events.push({t:"log", text:`${target.name} is ${ctx.condition}!`});
+  }
+  if(!ctx.parts && !failed) st.events.push({t:"log", text:`${target.name} resists ${ctx.lbl} (DC ${ctx.dc}).`});
+}
+
 /* Resolve a pending reaction: 'shield' | 'barbs' | 'decline'. */
 export function reactionChoose(st, ch, choice){
   const pr = st.pendingReaction;
   if(!pr) return st;
   st.pendingReaction = null;
+  // Save-type reaction (your spell, their save): Barbs forces the monster to reroll and keep the lower die.
+  if(pr.type === "save"){
+    const target = st.monsters[pr.ti];
+    let failed = false;                                  // they saved — unless Barbs takes it away
+    if(choice === "barbs"){
+      const sl = lowestSlot(ch);
+      if(sl != null){
+        ch.spells.slots[sl].cur -= 1;
+        st.reactionUsed = true;
+        st.barbsAdv = true;
+        const r2 = rollDie(20);
+        const orig = pr.sv.dice[0].v;
+        const kept = Math.min(orig, r2);
+        const total = kept + (pr.sv.mod || 0);
+        st.events.push({t:"sfx", name:"spell"},
+          {t:"log", text:`Reaction — Silvery Barbs! ${target.name} rerolls its save: ${orig} → ${r2}, keeps ${kept}.`});
+        failed = total < pr.dc;
+      }
+    }
+    applyCastOutcome(st, ch, pr, failed);
+    if(st.castQueue && !st.castQueue.targets.length){ st.castQueue = null; }
+    checkVictory(st, ch);
+    return st;
+  }
   const m = st.monsters[pr.mi];
   if(choice === "shield"){
     const sl = lowestSlot(ch);

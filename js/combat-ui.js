@@ -23,6 +23,7 @@ export function startCombatUI(state, character, floorNum, endCb){
   startMusic(st.monsters.some(m => m.crNum >= 4) ? "boss" : "combat");
   drain();
   render();
+  maybeAutoCast();                                       // resume a mid-spell save queue after a refresh
   maybeAutoMonster();
 }
 
@@ -42,6 +43,19 @@ function maybeAutoMonster(){
       if(st && st.phase === "monster" && !st.pendingReaction) maybeAutoMonster();
       else finishIfOver();
     }, 550);
+  }
+}
+
+/* Multi-target save spells resolve one target at a time (pausing on Barbs prompts). */
+function maybeAutoCast(){
+  if(st && st.castQueue && !st.pendingReaction){
+    setTimeout(() => {
+      if(!st || !st.castQueue || st.pendingReaction) return;
+      CB.castStep(st, ch);
+      drain(); render();
+      if(st && st.castQueue && !st.pendingReaction) maybeAutoCast();
+      else finishIfOver();
+    }, 450);
   }
 }
 
@@ -93,14 +107,27 @@ function renderBar(){
   }
   if(st.pendingReaction){
     const pr = st.pendingReaction;
+    if(pr.type === "save"){
+      const t = st.monsters[pr.ti];
+      bar.append(h("p", {class:"center reactline"},
+        `Reaction — ${t.name} resists ${pr.lbl} (${pr.sv.total} vs DC ${pr.dc})!`));
+      bar.append(h("button", {class:"btn primary", onclick: () => act(() => CB.reactionChoose(st, ch, "barbs"))}, icon("sparkle"), "Silvery Barbs — force a reroll (L1 slot)"));
+      bar.append(h("button", {class:"btn", onclick: () => act(() => CB.reactionChoose(st, ch, "decline"))}, "Let it stand"));
+      return;
+    }
     const m = st.monsters[pr.mi];
     bar.append(h("p", {class:"center reactline"},
       `Reaction — ${m.name}'s ${pr.atk.name} hits (${pr.res.total} vs AC ${pr.ac})${pr.crit ? ", a critical" : ""}!`));
     if(pr.options.includes("shield"))
-      bar.append(h("button", {class:"btn primary", onclick: () => act(() => CB.reactionChoose(st, ch, "shield"))}, icon("shield"), "Shield — +5 AC, turns it into a miss (L1 slot)"));
+      bar.append(h("button", {class:"btn primary", onclick: () => act(() => CB.reactionChoose(st, ch, "shield"))}, icon("shield"),
+        pr.deflects ? "Shield — turns it into a miss (L1 slot)" : "Shield — +5 AC until next turn; won't stop this one (L1 slot)"));
     if(pr.options.includes("barbs"))
       bar.append(h("button", {class:"btn primary", onclick: () => act(() => CB.reactionChoose(st, ch, "barbs"))}, icon("sparkle"), "Silvery Barbs — force a reroll (L1 slot)"));
     bar.append(h("button", {class:"btn", onclick: () => act(() => CB.reactionChoose(st, ch, "decline"))}, "Take the hit"));
+    return;
+  }
+  if(st.castQueue){
+    bar.append(h("button", {class:"btn", disabled:""}, "Resolving the spell…"));
     return;
   }
   if(st.phase !== "player"){
@@ -166,6 +193,7 @@ function act(fn){
   fn();
   drain();
   render();
+  maybeAutoCast();
   maybeAutoMonster();
   finishIfOver();
 }

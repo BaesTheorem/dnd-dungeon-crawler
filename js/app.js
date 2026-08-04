@@ -11,7 +11,7 @@ import * as C from "./character.js";
 import * as CB from "./combat.js";
 import { levelForXP, XP_TABLE, ABILITIES, fmtMod } from "./rules.js";
 import { rollDie } from "./dice.js";
-import { initAudio, loadAudioPrefs, audioPrefs, setAudioPref, sfx, startMusic, stopMusic } from "./audio.js";
+import { initAudio, loadAudioPrefs, audioPrefs, setAudioPref, sfx, startMusic, stopMusic, audioDebug } from "./audio.js";
 import { getJSON, setJSON } from "./storage.js";
 import { FLOORS, ROOMS_PER_FLOOR } from "../data/tables.js";
 import { classSpellList } from "../data/data.js";
@@ -39,6 +39,7 @@ async function boot(){
     return;
   }
   bindSheet(() => currentCombat());
+  window.__audioDebug = audioDebug;                     // console/diagnostic hook
   window.addEventListener("render-roster", renderRoster);
   renderRoster();
   showScreen("screen-roster");
@@ -116,6 +117,19 @@ function settingsCard(){
         prefs.light = document.body.classList.contains("light");
         setJSON("prefs", { ...getJSON("prefs", {}), light: prefs.light });
       }}, icon("moon", 16), "Theme")),
+    h("button", {class:"btn small", id:"audio-test", onclick: () => {
+      initAudio();
+      sfx("treasure");
+      setTimeout(() => {
+        const d = audioDebug();
+        const el = $("audio-test-note");
+        if(el) el.textContent = `Audio: ${d.context} · sounds played: ${d.soundsPlayed} · unlock loop: ${d.silentUnlock} · music: ${d.music}. ` +
+          (d.context === "running" && d.soundsPlayed > 0
+            ? "The engine is playing — if you hear nothing, check the ring/silent switch, volume buttons, and Bluetooth output."
+            : "Not unlocked yet — tap this button again.");
+      }, 350);
+    }}, icon("volume", 16), "Test sound"),
+    h("p", {class:"muted", id:"audio-test-note"}, ""),
     h("p", {class:"muted"}, `v${VERSION} · offline-ready · your heroes live in this device's browser storage`));
 }
 

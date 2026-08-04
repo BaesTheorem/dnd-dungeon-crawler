@@ -12,7 +12,7 @@ import { condEffects, advFor, combineAdv, autofails } from "../js/conditions.js"
 import { mod, profBonus, pointBuyTotal, slotsFor, acFrom, levelForXP, xpForCR, avgOfFormula, encounterMultiplier } from "../js/rules.js";
 import { injectData, idx, monsterAttacks, getMonster, spellMechanics, getWeapon, getArmor, classSpellList } from "../data/data.js";
 import * as C from "../js/character.js";
-import { materializeMonster, startCombat, playerAttack, playerCastSpell, endPlayerTurn, monsterTurn, monsterStep, reactionChoose, deathSave, combatOver, playerDodge } from "../js/combat.js";
+import { materializeMonster, startCombat, playerAttack, playerCastSpell, endPlayerTurn, monsterTurn, monsterStep, reactionChoose, castStep, deathSave, combatOver, playerDodge } from "../js/combat.js";
 import { newRun, nextRoom, enterCombat, resolveCombat, trapAct, openChest, shortRest, castUtility, castableOutOfCombat } from "../js/dungeon.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -438,6 +438,60 @@ test("Silvery Barbs reaction rerolls the hit and grants advantage on your next a
   assert.equal(st.barbsAdv, false, "consumed");
   const atkRoll = st.events.filter(e => e.t === "roll" && e.res.rt === "Attack").pop();
   assert.equal(atkRoll.res.adv, "adv");
+});
+
+test("Shield is offered even on hits it cannot deflect (buff still applies)", () => {
+  const ch = wizardWithReactions();
+  const st = startCombat(ch, [materializeMonster(getMonster("Goblin"))]);
+  st.phase = "monster"; st.mq = [];
+  const ac = C.armorClass(ch, st.playerBuffs);
+  // A monstrous hit: total is far beyond AC+5, so Shield can't stop it — but must still be castable.
+  st.pendingReaction = { type:"swing", mi:0, atk:{name:"Scimitar", parts:[{label:"", type:"slashing", dice:[{n:1,d:6}], mod:2}]},
+    res:{kind:"d20", dice:[{d:20, v:18}], mod:9, total:ac + 12}, crit:false, ac, options:["shield","barbs"], deflects:false };
+  const hpBefore = ch.hp.cur, slotBefore = ch.spells.slots[1].cur;
+  reactionChoose(st, ch, "shield");
+  assert.equal(ch.spells.slots[1].cur, slotBefore - 1, "slot spent");
+  assert.ok(ch.hp.cur < hpBefore, "the hit still lands");
+  assert.ok(st.playerBuffs.some(b => b.until === "turnStart" && b.amount === 5), "+5 AC persists for the rest of the round");
+});
+
+test("Silvery Barbs fires when a monster resists your save spell", () => {
+  let sawPrompt = false;
+  for(let i = 0; i < 200 && !sawPrompt; i++){
+    const ch = wizardWithReactions();
+    ch.spells.known.push("Burning Hands");
+    ch.spells.slots[1].cur = ch.spells.slots[1].max = 4;
+    const st = startCombat(ch, [materializeMonster(getMonster("Goblin"))]);
+    st.phase = "player"; st.actionsLeft = 1;
+    st.monsters[0].hp = st.monsters[0].maxHP = 999;
+    playerCastSpell(st, ch, "Burning Hands", 1, 0);
+    if(st.pendingReaction && st.pendingReaction.type === "save"){
+      sawPrompt = true;
+      const slotBefore = ch.spells.slots[1].cur;
+      reactionChoose(st, ch, "barbs");
+      assert.equal(ch.spells.slots[1].cur, slotBefore - 1, "reaction slot spent");
+      assert.ok(st.reactionUsed);
+      assert.equal(st.castQueue, null, "queue drained after the reroll");
+      assert.equal(st.pendingReaction, null);
+    } else {
+      // no prompt means the goblin failed its save (or queue drained) — flush must leave clean state
+      endPlayerTurn(st, ch);
+      assert.equal(st.castQueue, null);
+    }
+  }
+  assert.ok(sawPrompt, "a save-success reaction window occurred across trials");
+});
+
+test("endPlayerTurn flushes an unresolved cast queue safely", () => {
+  const ch = wizardWithReactions();
+  ch.spells.known.push("Burning Hands");
+  const st = startCombat(ch, [materializeMonster(getMonster("Goblin")), materializeMonster(getMonster("Goblin"), "B")]);
+  st.phase = "player"; st.actionsLeft = 1;
+  st.monsters.forEach(m => { m.hp = m.maxHP = 999; });
+  playerCastSpell(st, ch, "Burning Hands", 1, 0);       // AoE: two targets, only the first resolves synchronously
+  endPlayerTurn(st, ch);
+  assert.equal(st.castQueue, null, "queue fully drained");
+  assert.ok(["monster","player","victory"].includes(st.phase));
 });
 
 test("monsterStep pauses on a reaction window instead of resolving the swing", () => {
