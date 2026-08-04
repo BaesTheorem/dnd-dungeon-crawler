@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#14161c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Dungeon Crawler">
+<meta name="app-version" content="1.0.0">
+<title>Dungeon Crawler — D&D 5e</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icon-180.png">
+<link rel="icon" type="image/png" sizes="512x512" href="./icon-512.png">
+<link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+
+<!-- Loading -->
+<section id="screen-loading" class="screen active">
+  <div class="screen-scroll no-bar center" style="display:flex;flex-direction:column;justify-content:center">
+    <h1 class="title-hero">⚔ Dungeon Crawler</h1>
+    <p class="subtitle">A D&amp;D 5e roguelike descent</p>
+    <div class="progress"><div class="fill" id="loading-fill"></div></div>
+    <p class="muted center" id="loading-note">Lighting the torches…</p>
+  </div>
+</section>
+
+<!-- Roster -->
+<section id="screen-roster" class="screen">
+  <div class="screen-scroll no-bar" id="roster-body"></div>
+</section>
+
+<!-- Builder -->
+<section id="screen-builder" class="screen">
+  <div class="topbar"><h1 id="builder-title">New hero</h1></div>
+  <div class="screen-scroll no-bar" id="builder-body"></div>
+</section>
+
+<!-- Game (dungeon + combat share this screen) -->
+<section id="screen-game" class="screen">
+  <div class="topbar">
+    <h1 id="game-title">The Dungeon</h1>
+    <div class="roomcount" id="room-pips"></div>
+  </div>
+  <div class="screen-scroll" id="combat-area"></div>
+</section>
+
+<!-- End screens (death / victory) -->
+<section id="screen-end" class="screen">
+  <div class="screen-scroll no-bar" id="end-body"></div>
+</section>
+
+<!-- Bottom action bar -->
+<div id="actionbar" class="actionbar"></div>
+
+<!-- Character sheet drawer -->
+<div id="sheet-drawer">
+  <div class="panel">
+    <div class="grab"></div>
+    <div class="tabs">
+      <button data-tab="stats" class="sel">Stats</button>
+      <button data-tab="skills">Skills</button>
+      <button data-tab="gear">Gear</button>
+      <button data-tab="spells">Spells</button>
+      <button id="sheet-close" style="flex:0 0 44px">✕</button>
+    </div>
+    <div class="body" id="sheet-body"></div>
+  </div>
+</div>
+
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>

@@ -67,6 +67,15 @@ function buildEliteEncounter(ch, floor){
   const pool = monstersInBand(tune.band[0], tune.band[1]).sort((a, b) => b.crNum - a.crNum);
   return [materializeMonster(pool[0] || getMonster("Ogre"))];
 }
+/* A single wandering monster from the floor's lower CR half (rest-room ambushes). */
+export function buildAmbush(run, ch){
+  const tune = FLOOR_TUNING[run.floor - 1];
+  const midCR = (tune.band[0] + tune.band[1]) / 2;
+  const pool = monstersInBand(tune.band[0], Math.max(tune.band[0], midCR));
+  const m = pick(pool) || getMonster("Goblin");
+  return [materializeMonster(m)];
+}
+
 function buildBoss(){
   for(const name of BOSSES){
     const m = getMonster(name);
@@ -95,7 +104,7 @@ export function nextRoom(run, ch){
   else if(type === "stairs") room.monsters = buildEliteEncounter(ch, floor);
   else if(type === "boss") room.monsters = buildBoss();
   else if(type === "trap"){
-    room.trap = pick(TRAPS);
+    room.trap = pick(TRAPS.slice(0, Math.min(TRAPS.length, floor + 2)));   // deadlier traps only on deeper floors
     room.trapState = "hidden";
     room.detected = C.passivePerception(ch) >= room.trap.detectDC;
     if(room.detected) room.trapState = "detected";
@@ -105,7 +114,7 @@ export function nextRoom(run, ch){
     room.potion = Math.random() < tune.potionChance ? potionForFloor(floor) : null;
     const magicPool = MAGIC_LOOT[floor];
     room.magic = magicPool && Math.random() < 0.3 ? pick(magicPool) : null;
-    room.trapped = Math.random() < 0.25 ? pick(TRAPS) : null;
+    room.trapped = Math.random() < 0.25 ? pick(TRAPS.slice(0, Math.min(TRAPS.length, floor + 2))) : null;
   }
   else if(type === "event"){ room.event = pick(EVENTS); }
   run.room = room;

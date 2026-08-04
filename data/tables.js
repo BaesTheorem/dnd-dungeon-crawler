@@ -7,7 +7,7 @@ export const ROOMS_PER_FLOOR = 5;
    band: monster CR range drawn from; budget: adjusted-XP target for a normal combat room;
    eliteMult: stair-guard budget multiplier; gold: loot dice per treasure room. */
 export const FLOOR_TUNING = [
-  { band:[0, 0.5],   budget:100,  eliteMult:1.5, gold:"2d6",   potionChance:0.5 },
+  { band:[0, 0.5],   budget:60,   eliteMult:1.5, gold:"2d6",   potionChance:0.5 },
   { band:[0.125, 1], budget:225,  eliteMult:1.5, gold:"4d6",   potionChance:0.55 },
   { band:[0.25, 2],  budget:450,  eliteMult:1.5, gold:"2d6x10",potionChance:0.6 },
   { band:[0.5, 3],   budget:700,  eliteMult:1.5, gold:"4d6x10",potionChance:0.65 },
@@ -16,7 +16,7 @@ export const FLOOR_TUNING = [
 
 /* Final boss candidates by name (drawn from the bestiary; first one found wins). */
 export const BOSSES = ["Young White Dragon", "Ettin", "Minotaur", "Ogre"];
-export const STAIR_GUARDS = { 1:["Bugbear","Orc","Goblin"], 2:["Ogre","Bugbear","Ghoul"], 3:["Minotaur","Ogre","Wight"], 4:["Ettin","Minotaur","Troll"], 5:[] };
+export const STAIR_GUARDS = { 1:["Orc","Hobgoblin","Goblin"], 2:["Bugbear","Ghoul","Orc"], 3:["Minotaur","Ogre","Wight"], 4:["Ettin","Minotaur","Troll"], 5:[] };
 
 /* Room-type weights for rooms 1–4 of each floor (room 5 is always the stair guard / boss). */
 export const ROOM_WEIGHTS = [

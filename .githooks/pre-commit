@@ -1,0 +1,20 @@
+#!/bin/sh
+# Version/cache stamp (simplified from dnd-character-sheet's hook):
+# bumps the patch version in VERSION, stamps it into index.html's app-version meta,
+# renames the service-worker cache so every deploy busts cleanly, and writes version.json.
+# Activate once per clone: git config core.hooksPath .githooks
+
+set -e
+cd "$(git rev-parse --show-toplevel)"
+
+VER=$(cat VERSION 2>/dev/null || echo "1.0.0")
+MAJ=$(echo "$VER" | cut -d. -f1); MIN=$(echo "$VER" | cut -d. -f2); PAT=$(echo "$VER" | cut -d. -f3)
+NEW="$MAJ.$MIN.$((PAT + 1))"
+N=$(( (MAJ * 0) + MIN * 1000 + PAT + 1 ))
+
+echo "$NEW" > VERSION
+sed -i.bak "s/name=\"app-version\" content=\"[^\"]*\"/name=\"app-version\" content=\"$NEW\"/" index.html && rm -f index.html.bak
+sed -i.bak "s/const CACHE = \"dnd-crawler-v[^\"]*\"/const CACHE = \"dnd-crawler-v$N\"/" sw.js && rm -f sw.js.bak
+printf '{"version":"%s","cache":"dnd-crawler-v%s"}\n' "$NEW" "$N" > version.json
+
+git add VERSION index.html sw.js version.json

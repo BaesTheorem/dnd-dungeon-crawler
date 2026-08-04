@@ -1,0 +1,65 @@
+name: Deploy to Pages (with deploy retry)
+
+# Publishes the repo root as-is (no build step). Copied from dnd-character-sheet:
+# GitHub's Pages deploy backend intermittently hard-fails with "Deployment failed,
+# try again later" in bad windows lasting ~1-3 minutes, so retries are spaced
+# MINUTES apart (attempts at 0, +90s, +240s) to land after recovery.
+# `enablement: true` lets the first run auto-enable Pages on this fresh repo.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/configure-pages@v6
+        with:
+          enablement: true
+      - name: Upload site artifact (repo root)
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: .
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.final.outputs.page_url || steps.try1.outputs.page_url || steps.try2.outputs.page_url }}
+    steps:
+      - name: Deploy attempt 1
+        id: try1
+        uses: actions/deploy-pages@v5
+        continue-on-error: true
+
+      - name: Wait before retry
+        if: steps.try1.outcome == 'failure'
+        run: sleep 90
+
+      - name: Deploy attempt 2
+        id: try2
+        if: steps.try1.outcome == 'failure'
+        uses: actions/deploy-pages@v5
+        continue-on-error: true
+
+      - name: Wait before final attempt
+        if: steps.try1.outcome == 'failure' && steps.try2.outcome == 'failure'
+        run: sleep 150
+
+      - name: Deploy attempt 3 (final)
+        id: final
+        if: steps.try1.outcome == 'failure' && steps.try2.outcome == 'failure'
+        uses: actions/deploy-pages@v5
