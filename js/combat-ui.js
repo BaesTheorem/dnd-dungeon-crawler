@@ -4,7 +4,7 @@
 import { h, clear, $, hpBarEl, renderEvents, showBar, logEl } from "./ui.js";
 import * as CB from "./combat.js";
 import * as C from "./character.js";
-import { spellMechanics } from "../data/data.js";
+import { spellMechanics, scrollSpellName as spellNameOfScroll } from "../data/data.js";
 import { sfx, startMusic } from "./audio.js";
 import { queueSave } from "./state.js";
 import { fmtMod } from "./rules.js";
@@ -183,10 +183,24 @@ function renderBar(){
     return;
   }
   if(submenu === "item"){
-    const potions = ch.equipment.items.map((it, i) => ({it, i})).filter(x => /potion of .*healing/i.test(x.it.name));
-    potions.forEach(({it, i}) =>
-      bar.append(h("button", {class:"btn primary", onclick: () => { submenu = null; act(() => CB.playerUsePotion(st, ch, i)); }}, `${it.name} ×${it.qty}`)));
-    if(!potions.length) bar.append(h("button", {class:"btn", disabled:""}, "No potions"));
+    let any = false;
+    ch.equipment.items.forEach((it, i) => {
+      if(/potion of .*healing/i.test(it.name)){
+        any = true;
+        bar.append(h("button", {class:"btn primary", disabled: st.bonusUsed ? "" : null,
+          onclick: () => { submenu = null; act(() => CB.playerUsePotion(st, ch, i)); }}, `${it.name} ×${it.qty}`));
+        return;
+      }
+      const sp = spellNameOfScroll(it.name);
+      if(sp){
+        any = true;
+        const use = CB.scrollUsability(ch, sp);
+        bar.append(h("button", {class:"btn primary", disabled: (!use.ok || st.actionsLeft <= 0) ? "" : null,
+          onclick: () => { submenu = null; act(() => CB.playerUseScroll(st, ch, i, targetIdx)); }},
+          `${it.name} ×${it.qty}${!use.ok ? " — unintelligible" : use.check ? ` — DC ${use.check.dc} check` : ""}`));
+      }
+    });
+    if(!any) bar.append(h("button", {class:"btn", disabled:""}, "No usable items"));
     bar.append(h("button", {class:"btn", onclick: () => { submenu = null; render(); }}, "Cancel"));
     return;
   }
@@ -197,7 +211,7 @@ function renderBar(){
     icon("swords"), st.attacksLeft > 0 ? `Attack (${st.attacksLeft} left)` : "Attack"));
   if(ch.spells.known.length) grid.append(h("button", {class:"btn primary", disabled: st.actionsLeft <= 0 ? "" : null, onclick: () => { submenu = "cast"; render(); }}, icon("sparkle"), "Cast"));
   grid.append(h("button", {class:"btn", disabled: st.actionsLeft <= 0 ? "" : null, onclick: () => act(() => CB.playerDodge(st, ch))}, icon("shield"), "Dodge"));
-  grid.append(h("button", {class:"btn", disabled: st.bonusUsed ? "" : null, onclick: () => { submenu = "item"; render(); }}, icon("flask"), "Potion"));
+  grid.append(h("button", {class:"btn", onclick: () => { submenu = "item"; render(); }}, icon("flask"), "Items"));
   if(ch.resources.secondWind?.cur > 0)
     grid.append(h("button", {class:"btn", disabled: st.bonusUsed ? "" : null, onclick: () => act(() => CB.playerSecondWind(st, ch))}, icon("wind"), "Second Wind"));
   if(ch.resources.actionSurge?.cur > 0)

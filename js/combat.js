@@ -10,7 +10,7 @@ import { d20Roll, damageRoll, rollDie, parseDamageParts } from "./dice.js";
 import { condEffects, advFor, combineAdv, autofails } from "./conditions.js";
 import { xpForCR, avgDamage } from "./rules.js";
 import * as C from "./character.js";
-import { monsterAttacks, monsterHasMultiattack, spellMechanics, getSpell } from "../data/data.js";
+import { monsterAttacks, monsterHasMultiattack, spellMechanics, getSpell, classListHas, scrollSpellName } from "../data/data.js";
 
 /* Materialize a bestiary monster into serializable combat state. */
 export function materializeMonster(mon, tag = ""){
@@ -180,13 +180,13 @@ export function playerAttack(st, ch, weaponName, targetIdx){
   return st;
 }
 
-export function playerCastSpell(st, ch, spellName, slotLevel, targetIdx, opt){
+export function playerCastSpell(st, ch, spellName, slotLevel, targetIdx, opt, free = false){
   if(st.phase !== "player" || st.actionsLeft <= 0) return st;
   const mech = spellMechanics(spellName, ch.level);
   if(!mech) return st;
   const s = mech.spell;
   const isCantrip = s.level === 0;
-  if(!isCantrip){
+  if(!isCantrip && !free){                                // scroll casts spend no slot
     const slot = ch.spells.slots[slotLevel];
     if(!slot || slot.cur <= 0) return st;
     slot.cur -= 1;
@@ -333,6 +333,45 @@ function castUtilityInCombat(st, ch, s, lbl, slotLevel, targetIdx, opt){
     st.events.push({t:"sfx", name:"spell"},
       {t:"log", text:`You channel ${lbl} into raw arcana — advantage on your next attack and a ${slotLevel * 2}-point ward.`});
   }
+}
+
+/* ---- Spell scrolls (DMG rules) ----
+   On your class list → castable, no slot. NOT on your list → unintelligible, cannot be cast at all.
+   On your list but above the level you can cast → DC 10 + level check with your casting ability;
+   a failed check wastes the scroll. */
+export function scrollUsability(ch, spellName){
+  const s = getSpell(spellName);
+  if(!s) return { ok:false, why:"unknown" };
+  const cls = C.charClass(ch);
+  if(!cls || !classListHas(cls.name, s.name)) return { ok:false, why:"unintelligible" };
+  const maxLvl = Math.max(C.highestSlotLevel(ch), 0);
+  if(s.level > 0 && s.level > maxLvl) return { ok:true, check:{ dc: 10 + s.level } };
+  return { ok:true };
+}
+
+export function playerUseScroll(st, ch, itemIdx, targetIdx, opt){
+  if(st.phase !== "player" || st.actionsLeft <= 0) return st;
+  const item = ch.equipment.items[itemIdx];
+  const spellName = item && scrollSpellName(item.name);
+  if(!spellName) return st;
+  const use = scrollUsability(ch, spellName);
+  if(!use.ok){ st.events.push({t:"log", text:`The ${item.name} is unintelligible to you.`}); return st; }
+  // consume the scroll up front — success or botch, the magic leaves the parchment
+  item.qty -= 1;
+  if(item.qty <= 0) ch.equipment.items.splice(itemIdx, 1);
+  const s = getSpell(spellName);
+  if(use.check){
+    const mod = C.abilityMod(ch, C.castingAbility(ch) || "int");
+    const res = d20Roll({ label:`Scroll of ${s.name} (${C.castingAbility(ch)?.toUpperCase() || "INT"} check)`, rollType:"Check", mod });
+    st.events.push({t:"roll", res});
+    if(res.total < use.check.dc){
+      st.actionsLeft -= 1; st.attacksLeft = 0;
+      st.events.push({t:"sfx", name:"miss"}, {t:"log", text:`The words twist away from you (DC ${use.check.dc}) — the scroll crumbles, spent.`});
+      return st;
+    }
+  }
+  st.events.push({t:"log", text:`You read the Scroll of ${s.name}…`});
+  return playerCastSpell(st, ch, spellName, s.level, targetIdx, opt, true);
 }
 
 /* Familiar Help action: free once per round while the owl lives. */

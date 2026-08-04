@@ -99,6 +99,25 @@ export function classSpellList(className){
   return list.map(e => ({ name: e.n, level: e.l, spell: getSpell(e.n) })).filter(e => e.spell);
 }
 
+/* ---- Scrolls ---- */
+export function classListHas(className, spellName){
+  const list = (DATA.classSpells || {})[className] || [];
+  const lc = String(spellName).toLowerCase();
+  return list.some(e => e.n.toLowerCase() === lc);
+}
+/* All spells that appear on ANY class list within a level band — the loot/shop scroll pool. */
+export function scrollPool(minL, maxL){
+  const seen = new Map();
+  for(const cls in (DATA.classSpells || {})){
+    (DATA.classSpells[cls] || []).forEach(e => {
+      if(e.l < minL || e.l > maxL) return;
+      if(!seen.has(e.n) && getSpell(e.n)) seen.set(e.n, e.l);
+    });
+  }
+  return [...seen.entries()].map(([name, level]) => ({ name, level }));
+}
+export const scrollSpellName = itemName => (/^scroll of (.+)$/i.exec(String(itemName)) || [])[1] || null;
+
 /* Hand-encoded buffs the engine automates (small on purpose). */
 export const BUFF_SPELLS = {
   "bless":            { buff:"bless", label:"Bless (+1d4 attacks & saves)" },

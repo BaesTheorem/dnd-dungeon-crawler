@@ -237,8 +237,12 @@ function renderCorridor(){
     bar.append(h("button", {class:"btn primary", onclick: () => { sfx("door"); D.nextRoom(S.run, ch); queueSave(); renderRoom(); }},
       icon(nextIsLast ? (run.floor >= FLOORS ? "crown" : "stairs") : "door"),
       nextIsLast ? (run.floor >= FLOORS ? "Enter the boss lair" : "Approach the stairs") : "Open the next door"));
+    if(run.roomIndex === 0) bar.append(h("button", {class:"btn", onclick: shopBar}, icon("chest"), "Visit the peddler"));
     const castable = D.castableOutOfCombat(ch);
-    if(castable.length) bar.append(h("button", {class:"btn", onclick: castBar}, icon("sparkle"), "Cast a spell"));
+    const scrolls = D.usableScrollsOutOfCombat(ch);
+    if(castable.length || scrolls.length) bar.append(h("button", {class:"btn", onclick: castBar}, icon("sparkle"), "Cast a spell"));
+    const scribes = D.scribeableScrolls(ch);
+    if(scribes.length) bar.append(h("button", {class:"btn", onclick: scribeBar}, icon("scroll"), `Scribe scrolls (${scribes.length})`));
     bar.append(h("button", {class:"btn", onclick: campRest}, icon("fire"),
       `Make camp — short rest (${ch.familiar && ch.familiar.alive ? "risky" : "very risky"})`));
     bar.append(h("button", {class:"btn", onclick: () => openSheet(ch)}, icon("scroll"), "Character sheet"));
@@ -279,7 +283,57 @@ function renderCorridor(){
         mainBar();
       }}, label || `${n}${s.level ? ` (L${s.level})` : " (cantrip)"}${already ? " — active" : ""}`));
     });
+    D.usableScrollsOutOfCombat(ch).forEach(({idx, itemName, usable}) => {
+      bar.append(h("button", {class:"btn primary", disabled: usable.ok ? null : "",
+        onclick: () => {
+          const r = D.readScrollOutOfCombat(S.run, ch, idx);
+          r.events.forEach(e => { if(e.t === "sfx") sfx(e.name); });
+          renderEvents(logEl(), r.events);
+          queueSave();
+          mainBar();
+        }}, `${itemName}${usable.ok ? (usable.check ? ` — DC ${usable.check.dc} check` : "") : " — unintelligible"}`));
+    });
     bar.append(h("button", {class:"btn", onclick: mainBar}, "Cancel"));
+  };
+  const scribeBar = () => {
+    clear(bar);
+    D.scribeableScrolls(ch).forEach(entry => {
+      bar.append(h("button", {class:"btn primary", disabled: ch.equipment.gold < entry.cost ? "" : null,
+        onclick: () => {
+          const r = D.scribeScroll(ch, entry);
+          r.events.forEach(e => { if(e.t === "sfx") sfx(e.name); });
+          renderEvents(logEl(), r.events);
+          queueSave();
+          mainBar();
+        }}, `Scribe ${entry.name} (L${entry.level}) — ${entry.cost} gp`));
+    });
+    bar.append(h("p", {class:"muted center", style:"margin:2px 0 6px"}, `You have ${ch.equipment.gold} gp.`));
+    bar.append(h("button", {class:"btn", onclick: mainBar}, "Cancel"));
+  };
+  const shopBar = () => {
+    clear(bar);
+    const shop = D.floorShop(S.run, ch);
+    bar.append(h("p", {class:"center reactline"}, `The peddler's lantern glows. You have ${ch.equipment.gold} gp.`));
+    shop.stock.forEach((it, idx) => {
+      bar.append(h("button", {class:"btn primary", disabled: ch.equipment.gold < it.price ? "" : null,
+        onclick: () => {
+          const r = D.shopBuy(S.run, ch, idx);
+          r.events.forEach(e => { if(e.t === "sfx") sfx(e.name); });
+          renderEvents(logEl(), r.events);
+          queueSave();
+          shopBar();
+        }}, `Buy ${it.name}${it.qty > 1 ? ` ×${it.qty}` : ""} — ${it.price} gp`));
+    });
+    D.sellables(S.run, ch).forEach(entry => {
+      bar.append(h("button", {class:"btn", onclick: () => {
+        const r = D.shopSell(S.run, ch, entry);
+        r.events.forEach(e => { if(e.t === "sfx") sfx(e.name); });
+        renderEvents(logEl(), r.events);
+        queueSave();
+        shopBar();
+      }}, `Sell ${entry.name}${entry.qty > 1 ? ` ×${entry.qty}` : ""} — ${entry.price} gp`));
+    });
+    bar.append(h("button", {class:"btn", onclick: mainBar}, "Leave the peddler"));
   };
   mainBar();
 }

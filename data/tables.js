@@ -52,12 +52,19 @@ export const EVENTS = [
               {key:"skip", label:"Step around them"} ] },
 ];
 
-/* Magic loot by floor (names resolved against magicWeapons/magicItems datasets at award time). */
+/* Magic loot by floor — weapons only (armor/shields are shop stock; a "+1 Shield" in this list
+   used to masquerade as a 1d4 weapon). */
 export const MAGIC_LOOT = {
   3: ["+1 Longsword","+1 Shortsword","+1 Battleaxe","+1 Shortbow","+1 Warhammer","+1 Dagger"],
-  4: ["+1 Shield","+1 Longbow","+1 Greatsword","+1 Greataxe","+1 Rapier"],
+  4: ["+1 Glaive","+1 Longbow","+1 Greatsword","+1 Greataxe","+1 Rapier"],
   5: ["+2 Longsword","+2 Battleaxe","Flame Tongue Longsword","+2 Greatsword"],
 };
+
+/* Scroll loot/stock: spell-level band per floor, price by spell level. */
+export const SCROLL_BAND = { 1:[1,1], 2:[1,2], 3:[2,3], 4:[2,3], 5:[3,3] };
+export const SCROLL_PRICE = { 0:25, 1:50, 2:150, 3:300 };
+export const POTION_PRICE = { "Potion of Healing":50, "Potion of Greater Healing":150, "Potion of Superior Healing":450 };
+export const SCRIBE_COST_PER_LEVEL = 25;
 
 /* Short flavor text pools. */
 export const ROOM_FLAVOR = {

@@ -1,11 +1,12 @@
 /* Dungeon run engine: 5 floors × 5 rooms, materialized on entry and persisted so a refresh restores
    exact state. Room 5 of a floor is the guarded stair; floor 5 room 5 is the boss. */
 
-import { FLOORS, ROOMS_PER_FLOOR, FLOOR_TUNING, ROOM_WEIGHTS, TRAPS, EVENTS, BOSSES, STAIR_GUARDS, MAGIC_LOOT, ROOM_FLAVOR } from "../data/tables.js";
+import { FLOORS, ROOMS_PER_FLOOR, FLOOR_TUNING, ROOM_WEIGHTS, TRAPS, EVENTS, BOSSES, STAIR_GUARDS, MAGIC_LOOT, ROOM_FLAVOR,
+  SCROLL_BAND, SCROLL_PRICE, POTION_PRICE, SCRIBE_COST_PER_LEVEL } from "../data/tables.js";
 import { rollDie, d20Roll, damageRoll, parseDamageParts } from "./dice.js";
 import { xpForCR, encounterMultiplier, levelForXP, XP_TABLE } from "./rules.js";
-import { monstersInBand, getMonster } from "../data/data.js";
-import { materializeMonster, startCombat } from "./combat.js";
+import { monstersInBand, getMonster, scrollPool, scrollSpellName, classListHas, getSpell } from "../data/data.js";
+import { materializeMonster, startCombat, scrollUsability } from "./combat.js";
 import * as C from "./character.js";
 import { condEffects, advFor, combineAdv } from "./conditions.js";
 
@@ -32,6 +33,12 @@ function rollGold(expr){
 }
 function potionForFloor(floor){
   return floor >= 5 ? "Potion of Superior Healing" : floor >= 3 ? "Potion of Greater Healing" : "Potion of Healing";
+}
+function randomScroll(floor){
+  const [lo, hi] = SCROLL_BAND[Math.max(1, Math.min(5, floor))] || [1, 1];
+  const pool = scrollPool(lo, hi);
+  const pickd = pick(pool);
+  return pickd ? { name:`Scroll of ${pickd.name}`, level:pickd.level } : null;
 }
 export function addItem(ch, name, qty = 1){
   const ex = ch.equipment.items.find(i => i.name.toLowerCase() === name.toLowerCase());
@@ -135,6 +142,7 @@ export function nextRoom(run, ch){
     room.potion = Math.random() < tune.potionChance ? potionForFloor(floor) : null;
     const magicPool = MAGIC_LOOT[floor];
     room.magic = magicPool && Math.random() < 0.3 ? pick(magicPool) : null;
+    room.scroll = Math.random() < 0.35 ? (randomScroll(floor) || {}).name : null;
     room.trapped = Math.random() < 0.25 ? pick(TRAPS.slice(0, Math.min(TRAPS.length, floor + 2))) : null;
   }
   else if(type === "event"){ room.event = pick(EVENTS); }
@@ -179,8 +187,98 @@ function victoryLoot(run, ch){
     const magicPool = MAGIC_LOOT[Math.min(5, floor + 1)] || MAGIC_LOOT[floor];
     if(magicPool && Math.random() < 0.5){ reward.magic = pick(magicPool); }
     if(reward.magic && !ch.equipment.weapons.includes(reward.magic)) ch.equipment.weapons.push(reward.magic);
+    if(Math.random() < 0.4){ const sc = randomScroll(floor + 1); if(sc){ reward.scroll = sc.name; addItem(ch, sc.name); } }
   }
   return reward;
+}
+
+/* ---- The Wandering Peddler: waits by the landing at the start of every floor ---- */
+export function floorShop(run, ch){
+  if(run.shop && run.shop.floor === run.floor) return run.shop;
+  const floor = run.floor;
+  const stock = [];
+  const potion = potionForFloor(floor);
+  stock.push({ kind:"potion", name:potion, price:POTION_PRICE[potion] || 50, qty:3 });
+  for(let i = 0; i < 2; i++){
+    const sc = randomScroll(floor);
+    if(sc) stock.push({ kind:"scroll", name:sc.name, price:SCROLL_PRICE[sc.level] || 50, qty:1 });
+  }
+  const magicPool = MAGIC_LOOT[Math.max(3, Math.min(5, floor + 1))];
+  const mw = pick(magicPool || []);
+  if(mw && floor >= 2) stock.push({ kind:"weapon", name:mw, price:200 * floor, qty:1 });
+  run.shop = { floor, stock };
+  return run.shop;
+}
+export function shopBuy(run, ch, idx){
+  const shop = run.shop; const events = [];
+  const it = shop && shop.stock[idx];
+  if(!it || it.qty <= 0) return { events };
+  if(ch.equipment.gold < it.price){ events.push({t:"log", text:"You can't afford that."}); return { events }; }
+  ch.equipment.gold -= it.price;
+  it.qty -= 1;
+  if(it.qty <= 0) shop.stock.splice(idx, 1);
+  if(it.kind === "weapon"){ if(!ch.equipment.weapons.includes(it.name)) ch.equipment.weapons.push(it.name); }
+  else addItem(ch, it.name);
+  events.push({t:"sfx", name:"treasure"}, {t:"log", text:`Bought: ${it.name} (${it.price} gp). ${ch.equipment.gold} gp left.`});
+  return { events };
+}
+/* Sellables: potions at half price; magic weapons at half of shop rate (never your last weapon). */
+export function sellables(run, ch){
+  const out = [];
+  ch.equipment.items.forEach((it, i) => {
+    const p = POTION_PRICE[it.name]; if(p) out.push({ kind:"item", idx:i, name:it.name, qty:it.qty, price:Math.floor(p/2) });
+    const sc = scrollSpellName(it.name);
+    if(sc){ const s = getSpell(sc); if(s) out.push({ kind:"item", idx:i, name:it.name, qty:it.qty, price:Math.floor((SCROLL_PRICE[s.level] || 50)/2) }); }
+  });
+  if(ch.equipment.weapons.length > 1){
+    ch.equipment.weapons.forEach((w, i) => {
+      if(/^\+\d /.test(w) || /flame tongue/i.test(w)) out.push({ kind:"weapon", idx:i, name:w, price:100 * run.floor });
+    });
+  }
+  return out;
+}
+export function shopSell(run, ch, entry){
+  const events = [];
+  if(entry.kind === "weapon"){
+    if(ch.equipment.weapons.length <= 1) return { events };
+    ch.equipment.weapons.splice(entry.idx, 1);
+  } else {
+    const it = ch.equipment.items[entry.idx];
+    if(!it) return { events };
+    it.qty -= 1;
+    if(it.qty <= 0) ch.equipment.items.splice(entry.idx, 1);
+  }
+  ch.equipment.gold += entry.price;
+  events.push({t:"sfx", name:"treasure"}, {t:"log", text:`Sold: ${entry.name} (+${entry.price} gp). ${ch.equipment.gold} gp.`});
+  return { events };
+}
+
+/* ---- Scribing: a wizard copies an eligible scroll into the spellbook ---- */
+export function scribeableScrolls(ch){
+  if(!/wizard/i.test(ch.class)) return [];
+  const maxLvl = Math.max(C.highestSlotLevel(ch), 0);
+  const out = [];
+  ch.equipment.items.forEach((it, idx) => {
+    const nm = scrollSpellName(it.name); if(!nm) return;
+    const s = getSpell(nm); if(!s) return;
+    if(!classListHas("Wizard", s.name)) return;
+    if(s.level === 0 || s.level > maxLvl) return;
+    if(ch.spells.known.some(k => k.toLowerCase() === s.name.toLowerCase())) return;
+    out.push({ idx, name:s.name, level:s.level, cost:SCRIBE_COST_PER_LEVEL * s.level });
+  });
+  return out;
+}
+export function scribeScroll(ch, entry){
+  const events = [];
+  if(ch.equipment.gold < entry.cost){ events.push({t:"log", text:`Scribing ${entry.name} needs ${entry.cost} gp for inks.`}); return { events }; }
+  const it = ch.equipment.items[entry.idx];
+  if(!it || scrollSpellName(it.name)?.toLowerCase() !== entry.name.toLowerCase()) return { events };
+  ch.equipment.gold -= entry.cost;
+  it.qty -= 1;
+  if(it.qty <= 0) ch.equipment.items.splice(entry.idx, 1);
+  ch.spells.known.push(entry.name);
+  events.push({t:"sfx", name:"level-up"}, {t:"log", text:`You scribe ${entry.name} into your spellbook (${entry.cost} gp of rare inks). It is yours now.`});
+  return { events };
 }
 
 /* ---- Traps ----
@@ -247,6 +345,7 @@ export function openChest(run, ch){
   ch.equipment.gold += room.gold;
   events.push({t:"sfx", name:"treasure"}, {t:"log", text:`You find ${room.gold} gp.`});
   if(room.potion){ addItem(ch, room.potion); events.push({t:"log", text:`You find a ${room.potion}.`}); }
+  if(room.scroll){ addItem(ch, room.scroll); events.push({t:"log", text:`You find a ${room.scroll}.`}); }
   if(room.magic){
     ch.equipment.weapons.push(room.magic);
     events.push({t:"sfx", name:"level-up"}, {t:"log", text:`You find a ${room.magic}!`});
@@ -362,14 +461,14 @@ export function castableOutOfCombat(ch){
   return out;
 }
 
-export function castUtility(ch, name, opt, run){
+export function castUtility(ch, name, opt, run, free = false){
   const mech = spellMechanics(name, ch.level);
   const events = [];
   if(!mech) return { events };
   const s = mech.spell;
   const key = s.name.toLowerCase();
   let slotLevel = 0;
-  if(s.level > 0 && !s.ritual){                           // ritual casting: ten quiet minutes instead of a slot
+  if(s.level > 0 && !s.ritual && !free){                  // rituals & scrolls: no slot
     const lvls = Object.keys(ch.spells.slots || {}).map(Number).filter(l => l >= s.level && ch.spells.slots[l].cur > 0);
     if(!lvls.length){ events.push({t:"log", text:"No spell slots left."}); return { events }; }
     slotLevel = Math.min(...lvls);
@@ -409,6 +508,41 @@ export function castUtility(ch, name, opt, run){
     events.push({t:"sfx", name:"spell"}, {t:"log", text:`${mech.label} — lasts until your next long rest.`});
   }
   return { events };
+}
+
+/* ---- Reading scrolls between fights (healing / Mage Armor / ritual-style scrolls) ---- */
+export function usableScrollsOutOfCombat(ch){
+  const out = [];
+  ch.equipment.items.forEach((it, idx) => {
+    const nm = scrollSpellName(it.name); if(!nm) return;
+    const mech = spellMechanics(nm, ch.level); if(!mech) return;
+    const useful = mech.kind === "heal" || mech.buff === "mageArmor" || ["find familiar","detect magic"].includes(nm.toLowerCase());
+    if(!useful) return;
+    out.push({ idx, itemName: it.name, spell: nm, usable: scrollUsability(ch, nm) });
+  });
+  return out;
+}
+export function readScrollOutOfCombat(run, ch, idx){
+  const events = [];
+  const it = ch.equipment.items[idx];
+  const nm = it && scrollSpellName(it.name);
+  if(!nm) return { events };
+  const use = scrollUsability(ch, nm);
+  if(!use.ok){ events.push({t:"log", text:`The ${it.name} is unintelligible to you.`}); return { events }; }
+  it.qty -= 1;
+  if(it.qty <= 0) ch.equipment.items.splice(idx, 1);
+  if(use.check){
+    const mod = C.abilityMod(ch, C.castingAbility(ch) || "int");
+    const res = d20Roll({ label:`${it.name} (casting check)`, rollType:"Check", mod });
+    events.push({t:"roll", res});
+    if(res.total < use.check.dc){
+      events.push({t:"log", text:`The words twist away from you (DC ${use.check.dc}) — the scroll crumbles, spent.`});
+      return { events };
+    }
+  }
+  events.push({t:"log", text:`You read the ${it.name}…`});
+  const r = castUtility(ch, nm, undefined, run, true);
+  return { events: [...events, ...r.events] };
 }
 
 /* Consume the one-shot Prestidigitation check bonus (skill checks in trap/event rooms). */

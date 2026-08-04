@@ -12,8 +12,9 @@ import { condEffects, advFor, combineAdv, autofails } from "../js/conditions.js"
 import { mod, profBonus, pointBuyTotal, slotsFor, acFrom, levelForXP, xpForCR, avgOfFormula, encounterMultiplier } from "../js/rules.js";
 import { injectData, idx, monsterAttacks, getMonster, spellMechanics, getWeapon, getArmor, classSpellList } from "../data/data.js";
 import * as C from "../js/character.js";
-import { materializeMonster, startCombat, playerAttack, playerCastSpell, endPlayerTurn, monsterTurn, monsterStep, reactionChoose, castStep, deathSave, combatOver, playerDodge, playerFamiliarHelp, utilityOptions } from "../js/combat.js";
-import { newRun, nextRoom, enterCombat, resolveCombat, trapAct, openChest, shortRest, castUtility, castableOutOfCombat, peekNextRoom } from "../js/dungeon.js";
+import { materializeMonster, startCombat, playerAttack, playerCastSpell, endPlayerTurn, monsterTurn, monsterStep, reactionChoose, castStep, deathSave, combatOver, playerDodge, playerFamiliarHelp, utilityOptions, scrollUsability, playerUseScroll } from "../js/combat.js";
+import { newRun, nextRoom, enterCombat, resolveCombat, trapAct, openChest, shortRest, castUtility, castableOutOfCombat, peekNextRoom, floorShop, shopBuy, sellables, shopSell, scribeableScrolls, scribeScroll, readScrollOutOfCombat } from "../js/dungeon.js";
+import { scrollPool, classListHas } from "../data/data.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const blob = JSON.parse(readFileSync(join(here, "..", "data", "source-data.json"), "utf8"));
@@ -604,6 +605,86 @@ test("generic utility fallback: no castable spell is a dead button", () => {
   assert.equal(ch.spells.slots[1].cur, slotBefore - 1);
   assert.ok(st.helpAdv, "leveled fallback: advantage on next attack");
   assert.ok(ch.hp.temp >= 2, "and a ward");
+});
+
+/* ---- scrolls, scribing, and the peddler ---- */
+test("scroll rules: off-list unintelligible, on-list free cast, higher-level needs a check", () => {
+  assert.ok(scrollPool(1, 2).length > 20, "scroll pool draws from all class lists");
+  const fighter = makeFighter();
+  assert.equal(scrollUsability(fighter, "Fireball").ok, false, "no class list — cannot cast at all");
+  const wiz = makeWizard();
+  assert.ok(classListHas("Wizard", "Fireball"));
+  const easy = scrollUsability(wiz, "Magic Missile");
+  assert.ok(easy.ok && !easy.check, "castable level: no check");
+  const hard = scrollUsability(wiz, "Fireball");
+  assert.ok(hard.ok && hard.check && hard.check.dc === 13, "L3 above your slots: DC 13 check");
+
+  // in combat: on-list scroll casts without spending a slot, consuming the scroll
+  const st = startCombat(wiz, [materializeMonster(getMonster("Goblin"))]);
+  st.phase = "player"; st.actionsLeft = 1;
+  st.monsters[0].hp = st.monsters[0].maxHP = 999;
+  wiz.equipment.items.push({ name:"Scroll of Magic Missile", qty:1 });
+  const slotsBefore = wiz.spells.slots[1].cur;
+  const idx = wiz.equipment.items.findIndex(i => i.name === "Scroll of Magic Missile");
+  playerUseScroll(st, wiz, idx, 0);
+  assert.equal(wiz.spells.slots[1].cur, slotsBefore, "no slot spent");
+  assert.ok(!wiz.equipment.items.some(i => /magic missile/i.test(i.name)), "scroll consumed");
+
+  // fighter attempting a scroll in combat: refused, item kept
+  const st2 = startCombat(fighter, [materializeMonster(getMonster("Goblin"))]);
+  st2.phase = "player"; st2.actionsLeft = 1;
+  fighter.equipment.items.push({ name:"Scroll of Fireball", qty:1 });
+  const fIdx = fighter.equipment.items.findIndex(i => /fireball/i.test(i.name));
+  playerUseScroll(st2, fighter, fIdx, 0);
+  assert.ok(fighter.equipment.items.some(i => /fireball/i.test(i.name)), "unintelligible scroll is not consumed");
+});
+
+test("scribing: wizard copies an eligible scroll into the spellbook for gold", () => {
+  const wiz = makeWizard();
+  wiz.equipment.gold = 100;
+  wiz.equipment.items.push({ name:"Scroll of Shield", qty:1 });      // wizard L1, not known
+  wiz.equipment.items.push({ name:"Scroll of Cure Wounds", qty:1 }); // not on wizard list
+  wiz.equipment.items.push({ name:"Scroll of Fireball", qty:1 });    // above castable level
+  const list = scribeableScrolls(wiz);
+  assert.deepEqual(list.map(e => e.name), ["Shield"], "only on-list, castable-level, unknown spells");
+  const r = scribeScroll(wiz, list[0]);
+  assert.ok(wiz.spells.known.includes("Shield"));
+  assert.equal(wiz.equipment.gold, 100 - 25);
+  assert.ok(!wiz.equipment.items.some(i => /scroll of shield/i.test(i.name)), "scroll consumed");
+  assert.equal(scribeableScrolls(makeFighter()).length, 0, "fighters scribe nothing");
+});
+
+test("the peddler: stock per floor, buying and selling move gold and goods", () => {
+  const ch = makeFighter();
+  ch.equipment.gold = 1000;
+  const run = newRun(ch);
+  const shop = floorShop(run, ch);
+  assert.ok(shop.stock.length >= 2, "stocked");
+  assert.equal(floorShop(run, ch), shop, "same stock while on the floor");
+  const potionIdx = shop.stock.findIndex(s => s.kind === "potion");
+  const price = shop.stock[potionIdx].price;
+  const g0 = ch.equipment.gold;
+  shopBuy(run, ch, potionIdx);
+  assert.equal(ch.equipment.gold, g0 - price);
+  assert.ok(ch.equipment.items.some(i => /potion/i.test(i.name)));
+  const sells = sellables(run, ch);
+  assert.ok(sells.length >= 1, "the bought potion is sellable");
+  const g1 = ch.equipment.gold;
+  shopSell(run, ch, sells[0]);
+  assert.equal(ch.equipment.gold, g1 + sells[0].price);
+});
+
+test("out-of-combat scroll reading heals without a slot", () => {
+  const wiz = makeWizard();
+  wiz.hp.cur = 1;
+  wiz.equipment.items.push({ name:"Scroll of False Life", qty:1 });  // wizard list, generic — skip; use Mage Armor
+  wiz.equipment.items.push({ name:"Scroll of Mage Armor", qty:1 });
+  const run = newRun(wiz);
+  const slotsBefore = wiz.spells.slots[1].cur;
+  const target = wiz.equipment.items.findIndex(i => /mage armor/i.test(i.name));
+  const r = readScrollOutOfCombat(run, wiz, target);
+  assert.ok(wiz.effects.some(b => b.buff === "mageArmor"), "mage armor from the scroll");
+  assert.equal(wiz.spells.slots[1].cur, slotsBefore, "no slot spent");
 });
 
 test("corridor camp: risky short rest works with no room, ambushes more often", () => {
