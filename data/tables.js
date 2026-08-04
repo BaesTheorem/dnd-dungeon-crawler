@@ -42,7 +42,7 @@ export const EVENTS = [
     choices:[ {key:"drink", label:"Drink deeply", good:{heal:"2d8", chance:0.7}, bad:{dmg:"1d8 poison"}},
               {key:"skip", label:"Leave it be"} ] },
   { key:"shrine", name:"Forgotten Shrine", text:"A weathered altar to a nameless god, its offering bowl empty.",
-    choices:[ {key:"offer", label:"Offer 10 gp", cost:10, good:{buff:"bless", chance:0.8}, bad:{}},
+    choices:[ {key:"offer", label:"Make an offering", cost:10, good:{buff:"bless", chance:0.8}, bad:{}},
               {key:"skip", label:"Pass respectfully"} ] },
   { key:"corpse", name:"Fallen Adventurer", text:"A long-dead explorer slumps against the wall, pack still on their back.",
     choices:[ {key:"loot", label:"Search the body", good:{gold:"2d10", potion:true, chance:0.85}, bad:{trap:"Poison Dart Trap"}},
