@@ -69,20 +69,25 @@ export function hpBarEl(cur, max){
   return h("div", {class:"hpbar"}, h("div", {class:cls, style:`width:${pct}%`}));
 }
 
-/* Append engine events to an adventure-log element (newest at the bottom, auto-scroll). */
+/* Render engine events into the adventure log, LATEST ACTIVITY ON TOP: each batch is inserted
+   as a block above everything older, keeping chronological order inside the batch (an attack
+   roll still reads before its damage). Old entries trim off the bottom. */
+const LOG_MAX_ENTRIES = 80;
 export function renderEvents(logEl, events, { toast = true } = {}){
+  const batch = document.createDocumentFragment();
   (events || []).forEach(e => {
     if(e.t === "roll"){
       const cls = "entry roll" + (e.res.nat === 20 || e.res.crit ? " crit" : "");
-      logEl.append(h("div", {class: cls}, rollCard(e.res)));
+      batch.append(h("div", {class: cls}, rollCard(e.res)));
       if(toast) toastRoll(e.res);
     } else if(e.t === "log"){
       const hurt = /you take|you die|claims you|collapse/i.test(e.text);
-      logEl.append(h("div", {class:"entry" + (hurt ? " hurt" : "")}, e.text));
+      batch.append(h("div", {class:"entry" + (hurt ? " hurt" : "")}, e.text));
     }
   });
-  const sc = logEl.closest(".screen-scroll") || logEl.parentElement;
-  if(sc) requestAnimationFrame(() => { sc.scrollTop = sc.scrollHeight; });
+  if(!batch.childNodes.length) return;
+  logEl.insertBefore(batch, logEl.firstChild);
+  while(logEl.children.length > LOG_MAX_ENTRIES) logEl.removeChild(logEl.lastChild);
 }
 
 export function confirmDialog(msg){ return window.confirm(msg); }
