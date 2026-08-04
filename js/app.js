@@ -23,8 +23,11 @@ async function boot(){
   loadAudioPrefs();
   const prefs = getJSON("prefs", {});
   if(prefs.light) document.body.classList.add("light");
-  ["touchstart","mousedown","keydown"].forEach(ev =>
-    document.addEventListener(ev, () => initAudio(), { once:true, passive:true }));
+  // Every gesture re-arms audio: iOS suspends the context on background/interruption, so this
+  // must NOT be a once-only listener. touchend/click (not touchstart) count as activation gestures.
+  ["pointerdown","touchend","click","keydown"].forEach(ev =>
+    document.addEventListener(ev, () => initAudio(), { passive:true }));
+  document.addEventListener("visibilitychange", () => { if(!document.hidden) initAudio(); });
   if("serviceWorker" in navigator && location.protocol.startsWith("http")){
     navigator.serviceWorker.register("./sw.js").catch(() => {});
   }
@@ -168,11 +171,33 @@ function renderCorridor(){
     h("p", {class:"muted"}, `Room ${run.roomIndex} of ${ROOMS_PER_FLOOR} cleared on this floor.` + (nextIsLast ? (run.floor >= FLOORS ? " The boss lair is next." : " The stairs down are next — guarded.") : "")),
   ));
   area.append(statusStrip());
+  area.append(h("div", {class:"log"}, logEl()));
   const bar = clear($("actionbar")); showBar("actionbar");
-  bar.append(h("button", {class:"btn primary", onclick: () => { sfx("door"); D.nextRoom(S.run, ch); queueSave(); renderRoom(); }},
-    nextIsLast ? (run.floor >= FLOORS ? "⚔ Enter the boss lair" : "🚪 Approach the stairs") : "🚪 Open the next door"));
-  bar.append(h("button", {class:"btn", onclick: () => openSheet(ch)}, "📜 Character sheet"));
-  bar.append(h("button", {class:"btn", onclick: () => { saveNow(); renderRoster(); showScreen("screen-roster"); }}, "⬆ Retreat to the surface"));
+  const mainBar = () => {
+    clear(bar);
+    bar.append(h("button", {class:"btn primary", onclick: () => { sfx("door"); D.nextRoom(S.run, ch); queueSave(); renderRoom(); }},
+      nextIsLast ? (run.floor >= FLOORS ? "⚔ Enter the boss lair" : "🚪 Approach the stairs") : "🚪 Open the next door"));
+    const castable = D.castableOutOfCombat(ch);
+    if(castable.length) bar.append(h("button", {class:"btn", onclick: castBar}, "✨ Cast a spell"));
+    bar.append(h("button", {class:"btn", onclick: () => openSheet(ch)}, "📜 Character sheet"));
+    bar.append(h("button", {class:"btn", onclick: () => { saveNow(); renderRoster(); showScreen("screen-roster"); }}, "⬆ Retreat to the surface"));
+  };
+  const castBar = () => {
+    clear(bar);
+    D.castableOutOfCombat(ch).forEach(({n, mech}) => {
+      const s = mech.spell;
+      const already = mech.buff === "mageArmor" && (ch.effects || []).some(b => b.buff === "mageArmor");
+      bar.append(h("button", {class:"btn primary", disabled: already ? "" : null, onclick: () => {
+        const r = D.castUtility(ch, n);
+        r.events.forEach(e => { if(e.t === "sfx") sfx(e.name); });
+        renderEvents(logEl(), r.events);
+        queueSave();
+        mainBar();
+      }}, `${n}${s.level ? ` (L${s.level})` : " (cantrip)"}${already ? " — active" : ""}`));
+    });
+    bar.append(h("button", {class:"btn", onclick: mainBar}, "Cancel"));
+  };
+  mainBar();
 }
 
 function statusStrip(){

@@ -26,16 +26,48 @@ export function setAudioPref(key, val){
   if(key === "music" || key === "musicVol"){ if(prefs.music) ensureMusic(); }
 }
 
+/* iOS quirks handled here:
+   - The context may only be created/resumed inside a user gesture, and iOS re-suspends ("interrupted")
+     it whenever the PWA is backgrounded or a call comes in — so initAudio() is safe to call on EVERY
+     gesture, not just the first.
+   - Web Audio alone is muted by the ring/silent hardware switch. Looping a silent <audio> element
+     (started from a gesture) promotes the page to a "playback" audio session, which un-gates Web
+     Audio even with the switch on — the standard workaround. */
+let _silentEl = null;
+const SILENT_WAV = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQQAAACAgICA";
+function unlockSilentSession(){
+  try{
+    if(!_silentEl){
+      _silentEl = document.createElement("audio");
+      _silentEl.src = SILENT_WAV;
+      _silentEl.loop = true;
+      _silentEl.volume = 0.01;
+      _silentEl.setAttribute("playsinline", "");
+      _silentEl.setAttribute("aria-hidden", "true");
+      document.body.appendChild(_silentEl);
+    }
+    if(_silentEl.paused) _silentEl.play().catch(() => {});
+  }catch(e){}
+}
+
 export function initAudio(){
-  if(ctx) { if(ctx.state === "suspended") ctx.resume(); return; }
+  unlockSilentSession();
+  if(ctx){
+    if(ctx.state !== "running") ctx.resume().then(() => { if(_wantMusic && !musicRunning()) startMusic(_wantMusic); }).catch(() => {});
+    else if(_wantMusic && !musicRunning()) startMusic(_wantMusic);
+    return;
+  }
   try{
     ctx = new (window.AudioContext || window.webkitAudioContext)();
   }catch(e){ return; }
   sfxGain = ctx.createGain(); sfxGain.gain.value = prefs.sfx ? prefs.sfxVol : 0; sfxGain.connect(ctx.destination);
   musicGain = ctx.createGain(); musicGain.gain.value = prefs.music ? prefs.musicVol : 0; musicGain.connect(ctx.destination);
+  if(ctx.state !== "running") ctx.resume().catch(() => {});
+  ctx.onstatechange = () => { if(ctx.state === "running" && _wantMusic && !musicRunning()) startMusic(_wantMusic); };
   if(_wantMusic) startMusic(_wantMusic);
 }
 export function audioReady(){ return !!ctx && ctx.state !== "suspended"; }
+function musicRunning(){ return !!_music; }
 
 /* ---- SFX synthesis primitives ---- */
 function env(node, t0, a, d, peak = 1){
@@ -89,6 +121,7 @@ const SFX = {
 
 export function sfx(name){
   if(!ctx || !prefs.sfx) return;
+  if(ctx.state !== "running"){ ctx.resume().catch(() => {}); return; }
   const fn = SFX[name];
   if(fn) try{ fn(ctx.currentTime + 0.01); }catch(e){}
 }

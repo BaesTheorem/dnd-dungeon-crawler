@@ -24,6 +24,7 @@ export function newCharacter(){
     fightingStyle:null,
     resources:{},                         // secondWind:{max,cur}, actionSurge:{max,cur}, channelDivinity:{max,cur}, arcaneRecovery:{max,cur}
     conditions:[], exhaustion:0,
+    effects:[],                           // persistent buffs that outlive a combat (Mage Armor…); cleared on long rest
     deathSaves:{s:0, f:0},
     status:"alive",
     savedAt:0,
@@ -54,7 +55,8 @@ export function skillBonus(ch, key){
 export function passivePerception(ch){ return 10 + skillBonus(ch, "perception"); }
 
 /* ---- AC ---- */
-export function armorClass(ch, activeBuffs = []){
+export function armorClass(ch, combatBuffs = []){
+  const activeBuffs = [...(ch.effects || []), ...combatBuffs];
   const dex = abilityMod(ch, "dex");
   const armor = ch.equipment.armor ? getArmor(ch.equipment.armor) : null;
   let ac;
@@ -194,6 +196,7 @@ export function longRest(ch){
   for(const k in ch.resources) ch.resources[k].cur = ch.resources[k].max;
   ch.exhaustion = Math.max(0, ch.exhaustion - 1);
   ch.conditions = [];
+  ch.effects = [];                                       // 8-hour buffs like Mage Armor expire over a long rest
   ch.deathSaves = {s:0, f:0};
 }
 export function shortRestRecover(ch){

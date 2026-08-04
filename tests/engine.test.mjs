@@ -12,8 +12,8 @@ import { condEffects, advFor, combineAdv, autofails } from "../js/conditions.js"
 import { mod, profBonus, pointBuyTotal, slotsFor, acFrom, levelForXP, xpForCR, avgOfFormula, encounterMultiplier } from "../js/rules.js";
 import { injectData, idx, monsterAttacks, getMonster, spellMechanics, getWeapon, getArmor, classSpellList } from "../data/data.js";
 import * as C from "../js/character.js";
-import { materializeMonster, startCombat, playerAttack, playerCastSpell, endPlayerTurn, monsterTurn, deathSave, combatOver, playerDodge } from "../js/combat.js";
-import { newRun, nextRoom, enterCombat, resolveCombat, trapAct, openChest, shortRest } from "../js/dungeon.js";
+import { materializeMonster, startCombat, playerAttack, playerCastSpell, endPlayerTurn, monsterTurn, monsterStep, reactionChoose, deathSave, combatOver, playerDodge } from "../js/combat.js";
+import { newRun, nextRoom, enterCombat, resolveCombat, trapAct, openChest, shortRest, castUtility, castableOutOfCombat } from "../js/dungeon.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const blob = JSON.parse(readFileSync(join(here, "..", "data", "source-data.json"), "utf8"));
@@ -358,6 +358,107 @@ test("treasure chest awards gold/items", () => {
   assert.equal(ch.equipment.gold, g0 + 25);
   assert.ok(ch.equipment.items.some(i => i.name === "Potion of Healing" && i.qty >= 1));
   assert.ok(run.room.resolved);
+});
+
+/* ---- persistent effects & out-of-combat casting ---- */
+test("Mage Armor persists on the character, across combats, until long rest", () => {
+  const ch = makeWizard();
+  const baseAC = C.armorClass(ch);
+  const st = startCombat(ch, [materializeMonster(getMonster("Goblin"))]);
+  st.phase = "player"; st.actionsLeft = 1;
+  playerCastSpell(st, ch, "Mage Armor", 1, 0);
+  assert.ok((ch.effects || []).some(b => b.buff === "mageArmor"), "stored on the character, not the combat");
+  assert.equal(C.armorClass(ch), 13 + C.abilityMod(ch, "dex"), "AC applies with no combat running");
+  assert.ok(C.armorClass(ch) > baseAC);
+  const st2 = startCombat(ch, [materializeMonster(getMonster("Goblin"))]);
+  assert.equal(C.armorClass(ch, st2.playerBuffs), 13 + C.abilityMod(ch, "dex"), "still active in the NEXT combat");
+  C.longRest(ch);
+  assert.equal((ch.effects || []).length, 0, "expires on long rest");
+});
+
+test("castUtility: corridor Cure Wounds heals and spends a slot; Mage Armor castable outside combat", () => {
+  const ch = makeWizard();
+  const list = castableOutOfCombat(ch);
+  assert.ok(list.some(x => x.n === "Cure Wounds"));
+  assert.ok(list.some(x => x.n === "Mage Armor"));
+  ch.hp.cur = 1;
+  const before = ch.spells.slots[1].cur;
+  const r = castUtility(ch, "Cure Wounds");
+  assert.ok(ch.hp.cur > 1, "healed");
+  assert.equal(ch.spells.slots[1].cur, before - 1, "slot spent");
+  castUtility(ch, "Mage Armor");
+  assert.ok(ch.effects.some(b => b.buff === "mageArmor"));
+  assert.ok(r.events.length > 0);
+});
+
+/* ---- reactions ---- */
+function wizardWithReactions(){
+  const ch = makeWizard();
+  ch.spells.known.push("Shield", "Silvery Barbs");
+  ch.hp.max = ch.hp.cur = 50;
+  return ch;
+}
+
+test("Shield reaction turns a qualifying hit into a miss and expires at your next turn", () => {
+  const ch = wizardWithReactions();
+  const st = startCombat(ch, [materializeMonster(getMonster("Goblin"))]);
+  st.phase = "monster"; st.pendingReaction = null; st.mq = [];
+  const ac = C.armorClass(ch, st.playerBuffs);
+  st.pendingReaction = { mi:0, atk:{name:"Scimitar", parts:[{label:"", type:"slashing", dice:[{n:1,d:6}], mod:2}]},
+    res:{kind:"d20", dice:[{d:20, v:10}], mod:4, total:ac + 2}, crit:false, ac, options:["shield","barbs"] };
+  const hpBefore = ch.hp.cur, slotBefore = ch.spells.slots[1].cur;
+  reactionChoose(st, ch, "shield");
+  assert.equal(ch.hp.cur, hpBefore, "the hit became a miss — no damage");
+  assert.equal(ch.spells.slots[1].cur, slotBefore - 1, "slot spent");
+  assert.ok(st.reactionUsed);
+  assert.ok(st.playerBuffs.some(b => b.until === "turnStart" && b.amount === 5), "+5 AC buff active");
+  st.mq = [];                                             // drain the phase → next player turn
+  monsterTurn(st, ch);
+  if(st.phase === "player")
+    assert.ok(!st.playerBuffs.some(b => b.until === "turnStart"), "Shield expired at the start of your turn");
+});
+
+test("Silvery Barbs reaction rerolls the hit and grants advantage on your next attack", () => {
+  const ch = wizardWithReactions();
+  const st = startCombat(ch, [materializeMonster(getMonster("Goblin"))]);
+  st.phase = "monster"; st.mq = [];
+  const ac = C.armorClass(ch, st.playerBuffs);
+  st.pendingReaction = { mi:0, atk:{name:"Scimitar", parts:[{label:"", type:"slashing", dice:[{n:1,d:6}], mod:2}]},
+    res:{kind:"d20", dice:[{d:20, v:19}], mod:4, total:23}, crit:false, ac, options:["barbs"] };
+  const slotBefore = ch.spells.slots[1].cur;
+  reactionChoose(st, ch, "barbs");
+  assert.equal(ch.spells.slots[1].cur, slotBefore - 1, "slot spent");
+  assert.ok(st.reactionUsed);
+  assert.ok(st.barbsAdv, "advantage stored for your next attack");
+  assert.equal(st.pendingReaction, null);
+  // the stored advantage is consumed by the next player attack
+  st.phase = "player"; st.actionsLeft = 1; st.attacksLeft = 0;
+  st.monsters[0].hp = st.monsters[0].maxHP = 999;
+  playerAttack(st, ch, "Dagger", 0);
+  assert.equal(st.barbsAdv, false, "consumed");
+  const atkRoll = st.events.filter(e => e.t === "roll" && e.res.rt === "Attack").pop();
+  assert.equal(atkRoll.res.adv, "adv");
+});
+
+test("monsterStep pauses on a reaction window instead of resolving the swing", () => {
+  let sawPause = false;
+  for(let i = 0; i < 120 && !sawPause; i++){
+    const ch = wizardWithReactions();
+    const st = startCombat(ch, [materializeMonster(getMonster("Goblin"))]);
+    if(st.phase !== "monster"){ st.phase = "monster"; st.mq = null; }
+    let guard = 40;
+    while(st.phase === "monster" && guard-- > 0){
+      if(st.pendingReaction){
+        sawPause = true;
+        assert.ok(st.pendingReaction.options.length >= 1);
+        assert.ok(JSON.parse(JSON.stringify(st)).pendingReaction, "pending reaction survives persistence");
+        reactionChoose(st, ch, "decline");
+      } else {
+        monsterStep(st, ch);
+      }
+    }
+  }
+  assert.ok(sawPause, "a reaction window occurred across trials");
 });
 
 test("short rest spends hit dice and heals", () => {

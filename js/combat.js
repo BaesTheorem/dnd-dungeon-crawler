@@ -32,6 +32,7 @@ export function startCombat(ch, monsters, { surprise = false, label = "" } = {})
     monsters: monsters.map(m => ({...m})),
     playerDodge:false, playerBuffs:[], events:[],
     actionsLeft:1, attacksLeft:0, bonusUsed:false, usedSecondWindThisTurn:false,
+    reactionUsed:false, pendingReaction:null, mq:null, barbsAdv:false,
     fledFailed:false, xp: monsters.reduce((a,m) => a + xpForCR(m.cr), 0),
   };
   // Initiative: player d20+dex vs group (highest monster dex). Ties go to the player.
@@ -56,6 +57,9 @@ function beginPlayerTurn(st, ch){
   st.actionsLeft = 1;
   st.attacksLeft = 0;
   st.bonusUsed = false;
+  st.reactionUsed = false;                                 // reactions refresh at the start of your turn
+  st.mq = null;
+  st.playerBuffs = st.playerBuffs.filter(b => b.until !== "turnStart");   // Shield expires now
   // Heroism buff: temp HP at the start of your turn.
   st.playerBuffs.forEach(b => { if(b.buff === "heroism") ch.hp.temp = Math.max(ch.hp.temp, b.mod || 1); });
   st.events.push({t:"phase", phase:"player"});
@@ -137,7 +141,8 @@ export function playerAttack(st, ch, weaponName, targetIdx){
   if(!target || target.hp <= 0) return st;
   const atk = C.weaponAttack(ch, weaponName);
   const eff = condEffects(ch.conditions, ch.exhaustion);
-  const adv = combineAdv(advFor(eff, ["attack"]), advAgainstTarget(monsterCondKeys(target), !atk.ranged, false));
+  let adv = combineAdv(advFor(eff, ["attack"]), advAgainstTarget(monsterCondKeys(target), !atk.ranged, false));
+  if(st.barbsAdv){ adv = combineAdv(adv, "adv"); st.barbsAdv = false; }   // Silvery Barbs' self-empowerment
   const bb = blessBonus(st);
   const res = d20Roll({ label:`${atk.name} vs ${target.name}`, rollType:"Attack", mod: atk.toHit + bb, adv });
   st.events.push({t:"roll", res});
@@ -196,10 +201,16 @@ export function playerCastSpell(st, ch, spellName, slotLevel, targetIdx){
     ch.hp.cur = Math.min(C.computeMaxHP(ch), ch.hp.cur + res.total);
     st.events.push({t:"roll", res}, {t:"sfx", name:"heal"}, {t:"log", text:`You regain ${res.total} HP (${ch.hp.cur}/${ch.hp.max}).`});
   } else if(mech.kind === "buff"){
-    st.playerBuffs = st.playerBuffs.filter(b => !(b.conc && s.conc));   // one concentration effect at a time
-    st.playerBuffs.push({ buff:mech.buff, amount:mech.amount, label:mech.label, conc: !!s.conc,
-      mod: mech.buff === "heroism" ? C.abilityMod(ch, C.castingAbility(ch)) : 0 });
-    st.events.push({t:"log", text:`${mech.label} active.`});
+    if(mech.buff === "mageArmor"){                        // 8-hour spell: persists across fights until long rest
+      ch.effects = (ch.effects || []).filter(b => b.buff !== "mageArmor");
+      ch.effects.push({ buff:"mageArmor", label:mech.label });
+      st.events.push({t:"log", text:`${mech.label} — lasts until your next long rest.`});
+    } else {
+      st.playerBuffs = st.playerBuffs.filter(b => !(b.conc && s.conc));   // one concentration effect at a time
+      st.playerBuffs.push({ buff:mech.buff, amount:mech.amount, label:mech.label, conc: !!s.conc,
+        mod: mech.buff === "heroism" ? C.abilityMod(ch, C.castingAbility(ch)) : 0 });
+      st.events.push({t:"log", text:`${mech.label} active.`});
+    }
   } else if(mech.kind === "attack"){
     const target = st.monsters[targetIdx];
     if(!target || target.hp <= 0) return st;
@@ -335,18 +346,31 @@ export function endPlayerTurn(st, ch){
   return st;
 }
 
-/* ---- Monster turn: every living monster acts; called once per round by the UI. ---- */
-export function monsterTurn(st, ch){
-  if(st.phase !== "monster") return st;
-  for(const m of livingMonsters(st)){
-    // Condition upkeep: tick rounds, re-save at end where allowed.
-    const incap = m.conditions.some(c => ["paralyzed","stunned","unconscious","petrified","incapacitated"].includes(c.k));
-    if(!incap){
-      monsterAct(st, ch, m);
-      if(st.phase === "dying" || combatOver(st)) break;
-    } else {
-      st.events.push({t:"log", text:`${m.name} is ${m.conditions[0].k} and cannot act.`});
-    }
+/* ---- Monster turn: a STEP MACHINE so a swing can pause for the player's reaction (Shield /
+   Silvery Barbs). The UI calls monsterStep() repeatedly; a pending reaction suspends the queue
+   until reactionChoose() resolves it. Everything in st.mq / st.pendingReaction is JSON-safe, so
+   a mid-turn refresh restores exactly. ---- */
+
+function buildMonsterQueue(st){
+  const q = [];
+  st.monsters.forEach((m, mi) => { if(m.hp > 0) q.push({kind:"act", mi}, {kind:"upkeep", mi}); });
+  return q;
+}
+
+/* Advance the monster phase by one step. Returns false when there is nothing to do
+   (not monster phase, or waiting on a reaction). */
+export function monsterStep(st, ch){
+  if(st.phase !== "monster" || st.pendingReaction) return false;
+  if(!st.mq) st.mq = buildMonsterQueue(st);
+  const step = st.mq.shift();
+  if(!step){
+    st.round += 1;
+    beginPlayerTurn(st, ch);
+    return true;
+  }
+  const m = st.monsters[step.mi];
+  if(!m || m.hp <= 0) return true;
+  if(step.kind === "upkeep"){
     m.conditions = m.conditions.filter(c => {
       c.rounds -= 1;
       if(c.rounds <= 0){ st.events.push({t:"log", text:`${m.name} is no longer ${c.k}.`}); return false; }
@@ -356,18 +380,13 @@ export function monsterTurn(st, ch){
       }
       return true;
     });
+    return true;
   }
-  if(st.phase === "monster"){
-    st.round += 1;
-    beginPlayerTurn(st, ch);
-  }
-  return st;
-}
-
-function monsterAct(st, ch, m){
+  // act: choose an attack, queue its swings ahead of this monster's upkeep
+  const incap = m.conditions.some(c => ["paralyzed","stunned","unconscious","petrified","incapacitated"].includes(c.k));
+  if(incap){ st.events.push({t:"log", text:`${m.name} is ${m.conditions[0].k} and cannot act.`}); return true; }
   const attacks = m.attacks;
-  if(!attacks.length) return;
-  // Recharge abilities: roll d6 ≥ threshold to re-arm; use best ready attack (highest avg damage).
+  if(!attacks.length) return true;
   attacks.forEach(a => {
     if(a.recharge != null && m.recharge[a.name] === false){
       if(rollDie(6) >= a.recharge) m.recharge[a.name] = true;
@@ -378,26 +397,56 @@ function monsterAct(st, ch, m){
   const chosen = ready[0] || attacks[0];
   if(chosen.recharge != null) m.recharge[chosen.name] = false;
   const swings = (m.multi && !chosen.save) ? 2 : 1;
-  for(let i = 0; i < swings; i++){
-    if(st.phase !== "monster") return;
-    if(chosen.save) monsterSaveAttack(st, ch, m, chosen);
-    else monsterWeaponAttack(st, ch, m, chosen);
-  }
+  const swingSteps = Array.from({length: swings}, () => ({kind:"swing", mi: step.mi, atk: chosen}));
+  st.mq.unshift(...swingSteps);
+  // execute the first swing immediately so each step visibly does something
+  return doSwing(st, ch);
 }
 
-function monsterWeaponAttack(st, ch, m, atk){
+function doSwing(st, ch){
+  const step = st.mq.shift();
+  if(!step || step.kind !== "swing") { if(step) st.mq.unshift(step); return true; }
+  const m = st.monsters[step.mi];
+  if(!m || m.hp <= 0) return true;
+  if(step.atk.save) monsterSaveAttack(st, ch, m, step.atk);
+  else attemptSwing(st, ch, step.mi, m, step.atk);
+  return true;
+}
+
+const knowsSpell = (ch, name) => (ch.spells.known || []).some(n => n.toLowerCase() === name.toLowerCase());
+function lowestSlot(ch, minLvl = 1){
+  const lvls = Object.keys(ch.spells.slots || {}).map(Number).filter(l => l >= minLvl && ch.spells.slots[l].cur > 0);
+  return lvls.length ? Math.min(...lvls) : null;
+}
+
+function attemptSwing(st, ch, mi, m, atk){
   const mEff = condEffects(monsterCondKeys(m), 0);
-  const pConds = [...ch.conditions];
-  const adv = combineAdv(advFor(mEff, ["attack"]), advAgainstTarget(pConds, true, st.playerDodge));
+  const adv = combineAdv(advFor(mEff, ["attack"]), advAgainstTarget([...ch.conditions], true, st.playerDodge));
   const res = d20Roll({ label:`${m.name} — ${atk.name}`, rollType:"Attack", mod:atk.toHit, adv });
   st.events.push({t:"roll", res});
-  const activeAC = C.armorClass(ch, st.playerBuffs);
+  const ac = C.armorClass(ch, st.playerBuffs);
   const crit = res.dice[0].v === 20;
-  const hit = res.dice[0].v !== 1 && (crit || res.total >= activeAC);
+  const hit = res.dice[0].v !== 1 && (crit || res.total >= ac);
   if(!hit){
     st.events.push({t:"sfx", name:"monster-miss"}, {t:"log", text:`${m.name}'s ${atk.name} misses you.`});
     return;
   }
+  // Reaction window: offer Shield only when +5 AC would turn this hit into a miss (never vs a nat 20);
+  // offer Silvery Barbs on any hit including crits (the reroll can cancel one).
+  if(!st.reactionUsed && st.phase === "monster"){
+    const options = [];
+    if(knowsSpell(ch, "Shield") && lowestSlot(ch) != null && !crit && res.total < ac + 5) options.push("shield");
+    if(knowsSpell(ch, "Silvery Barbs") && lowestSlot(ch) != null) options.push("barbs");
+    if(options.length){
+      st.pendingReaction = { mi, atk, res, crit, ac, options };
+      st.events.push({t:"log", text:`${m.name}'s ${atk.name} is about to hit you (${res.total} vs AC ${ac})…`});
+      return;
+    }
+  }
+  resolveSwingHit(st, ch, m, atk, res, crit);
+}
+
+function resolveSwingHit(st, ch, m, atk, res, crit){
   const dmg = damageRoll({ label:`${atk.name} damage`, parts:atk.parts, crit });
   st.events.push({t:"roll", res:dmg});
   if(crit) st.events.push({t:"log", text:`${m.name} scores a critical hit!`});
@@ -415,6 +464,65 @@ function monsterWeaponAttack(st, ch, m, atk){
       }
     }
   }
+}
+
+/* Resolve a pending reaction: 'shield' | 'barbs' | 'decline'. */
+export function reactionChoose(st, ch, choice){
+  const pr = st.pendingReaction;
+  if(!pr) return st;
+  st.pendingReaction = null;
+  const m = st.monsters[pr.mi];
+  if(choice === "shield"){
+    const sl = lowestSlot(ch);
+    if(sl != null){
+      ch.spells.slots[sl].cur -= 1;
+      st.reactionUsed = true;
+      st.playerBuffs.push({ buff:"acBonus", amount:5, until:"turnStart", label:"Shield (+5 AC)" });
+      st.events.push({t:"sfx", name:"spell"}, {t:"log", text:`⚡ Reaction — Shield! Your AC leaps to ${pr.ac + 5} until your next turn.`});
+      const newAC = C.armorClass(ch, st.playerBuffs);
+      if(!pr.crit && pr.res.total < newAC){
+        st.events.push({t:"sfx", name:"monster-miss"}, {t:"log", text:`${m.name}'s ${pr.atk.name} glances off the shimmering barrier!`});
+        return st;
+      }
+    }
+    resolveSwingHit(st, ch, m, pr.atk, pr.res, pr.crit);
+    return st;
+  }
+  if(choice === "barbs"){
+    const sl = lowestSlot(ch);
+    if(sl != null){
+      ch.spells.slots[sl].cur -= 1;
+      st.reactionUsed = true;
+      st.barbsAdv = true;                                  // you also empower yourself: advantage on your next attack
+      const r2 = rollDie(20);
+      const orig = pr.res.dice[0].v;
+      const kept = Math.min(orig, r2);
+      const total = kept + (pr.res.mod || 0);
+      st.events.push({t:"sfx", name:"spell"},
+        {t:"log", text:`⚡ Reaction — Silvery Barbs! ${m.name} rerolls: ${orig} → ${r2}, keeps ${kept}.`});
+      const crit = kept === 20;
+      const hit = kept !== 1 && (crit || total >= pr.ac);
+      if(!hit){
+        st.events.push({t:"sfx", name:"monster-miss"}, {t:"log", text:`${m.name}'s ${pr.atk.name} falters and misses!`});
+        return st;
+      }
+      resolveSwingHit(st, ch, m, pr.atk, { ...pr.res, dice:[{d:20, v:kept}], total }, crit);
+      return st;
+    }
+  }
+  resolveSwingHit(st, ch, m, pr.atk, pr.res, pr.crit);
+  return st;
+}
+
+/* Compatibility wrapper (tests + monsters-first openings): run the whole monster phase,
+   auto-declining any reaction windows. */
+export function monsterTurn(st, ch){
+  let guard = 300;
+  while(st.phase === "monster" && guard-- > 0){
+    if(st.pendingReaction) reactionChoose(st, ch, "decline");
+    else monsterStep(st, ch);
+  }
+  return st;
 }
 
 function monsterSaveAttack(st, ch, m, atk){

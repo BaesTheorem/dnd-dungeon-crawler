@@ -30,7 +30,8 @@ export function renderSheet(ch){
   document.querySelectorAll("#sheet-drawer .tabs button").forEach(b => b.classList.toggle("sel", b.dataset.tab === tab));
   const body = clear($("sheet-body"));
   const combat = getCombat();
-  const buffs = combat ? combat.playerBuffs : [];
+  const buffs = combat ? combat.playerBuffs : [];          // armorClass folds in ch.effects itself
+  const shownBuffs = [...(ch.effects || []), ...buffs];
   if(tab === "stats"){
     body.append(
       h("h2", {style:"margin:0 0 2px"}, ch.name),
@@ -60,9 +61,9 @@ export function renderSheet(ch){
           ...conds.map(k => h("span", {class:"chip bad"}, CONDITIONS.find(c => c.k === k)?.name || k)),
           ch.exhaustion ? h("span", {class:"chip bad"}, `Exhaustion ${ch.exhaustion}: ${EXHAUSTION_STAGES[ch.exhaustion-1]}`) : null));
     }
-    if(buffs.length){
+    if(shownBuffs.length){
       body.append(h("h2", {style:"margin-top:14px"}, "Active effects"),
-        h("div", {class:"condchips"}, ...buffs.map(b => h("span", {class:"chip"}, b.label))));
+        h("div", {class:"condchips"}, ...shownBuffs.map(b => h("span", {class:"chip"}, b.label))));
     }
     const res = ch.resources || {};
     const resNames = {secondWind:"Second Wind", actionSurge:"Action Surge", channelDivinity:"Channel Divinity", arcaneRecovery:"Arcane Recovery"};

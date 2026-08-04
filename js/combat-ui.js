@@ -33,13 +33,14 @@ function drain(){
 }
 
 function maybeAutoMonster(){
-  if(st && st.phase === "monster"){
+  if(st && st.phase === "monster" && !st.pendingReaction){
     setTimeout(() => {
-      if(!st || st.phase !== "monster") return;
-      CB.monsterTurn(st, ch);
+      if(!st || st.phase !== "monster" || st.pendingReaction) return;
+      CB.monsterStep(st, ch);
       drain(); render();
-      finishIfOver();
-    }, 650);
+      if(st && st.phase === "monster" && !st.pendingReaction) maybeAutoMonster();
+      else finishIfOver();
+    }, 550);
   }
 }
 
@@ -87,6 +88,18 @@ function renderBar(){
   if(st.phase === "dying"){
     bar.append(h("button", {class:"btn danger", onclick: () => act(() => CB.deathSave(st, ch))},
       `☠ Roll death save (${ch.deathSaves.s}✓ ${ch.deathSaves.f}✗)`));
+    return;
+  }
+  if(st.pendingReaction){
+    const pr = st.pendingReaction;
+    const m = st.monsters[pr.mi];
+    bar.append(h("p", {class:"center", style:"margin:2px 0 6px;font-weight:700"},
+      `⚡ ${m.name}'s ${pr.atk.name} hits (${pr.res.total} vs AC ${pr.ac})${pr.crit ? " — CRIT!" : ""} React?`));
+    if(pr.options.includes("shield"))
+      bar.append(h("button", {class:"btn primary", onclick: () => act(() => CB.reactionChoose(st, ch, "shield"))}, "🛡 Shield — +5 AC, turns it into a miss (L1 slot)"));
+    if(pr.options.includes("barbs"))
+      bar.append(h("button", {class:"btn primary", onclick: () => act(() => CB.reactionChoose(st, ch, "barbs"))}, "✨ Silvery Barbs — force a reroll (L1 slot)"));
+    bar.append(h("button", {class:"btn", onclick: () => act(() => CB.reactionChoose(st, ch, "decline"))}, "Take the hit"));
     return;
   }
   if(st.phase !== "player"){

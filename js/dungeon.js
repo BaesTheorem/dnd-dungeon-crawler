@@ -306,6 +306,46 @@ export function eventChoose(run, ch, choiceKey){
   return { events };
 }
 
+/* ---- Out-of-combat casting (corridor): healing spells and persistent buffs like Mage Armor ---- */
+import { spellMechanics } from "../data/data.js";
+export function castableOutOfCombat(ch){
+  return (ch.spells.known || []).map(n => ({ n, mech: spellMechanics(n, ch.level) }))
+    .filter(x => x.mech && (x.mech.kind === "heal" || x.mech.buff === "mageArmor"))
+    .filter(x => {
+      if(x.mech.spell.level === 0) return true;
+      return Object.keys(ch.spells.slots || {}).some(l => +l >= x.mech.spell.level && ch.spells.slots[l].cur > 0);
+    });
+}
+export function castUtility(ch, name){
+  const mech = spellMechanics(name, ch.level);
+  const events = [];
+  if(!mech) return { events };
+  const s = mech.spell;
+  let slotLevel = 0;
+  if(s.level > 0){
+    const lvls = Object.keys(ch.spells.slots || {}).map(Number).filter(l => l >= s.level && ch.spells.slots[l].cur > 0);
+    if(!lvls.length){ events.push({t:"log", text:"No spell slots left."}); return { events }; }
+    slotLevel = Math.min(...lvls);
+    ch.spells.slots[slotLevel].cur -= 1;
+  }
+  if(mech.kind === "heal"){
+    const dice = [...mech.heal.dice];
+    if(mech.upcast && slotLevel > s.level){
+      const up = /(\d+)d(\d+)/.exec(mech.upcast.up);
+      if(up) dice.push({n:+up[1] * (slotLevel - s.level), d:+up[2]});
+    }
+    const modV = mech.heal.addMod ? C.abilityMod(ch, C.castingAbility(ch)) : 0;
+    const res = damageRoll({ label:s.name, rollType:"Healing", parts:[{label:"healing", type:"", dice, mod:modV}] });
+    ch.hp.cur = Math.min(C.computeMaxHP(ch), ch.hp.cur + res.total);
+    events.push({t:"roll", res}, {t:"sfx", name:"heal"}, {t:"log", text:`${s.name}: +${res.total} HP (${ch.hp.cur}/${ch.hp.max}).`});
+  } else if(mech.buff === "mageArmor"){
+    ch.effects = (ch.effects || []).filter(b => b.buff !== "mageArmor");
+    ch.effects.push({ buff:"mageArmor", label:mech.label });
+    events.push({t:"sfx", name:"spell"}, {t:"log", text:`${mech.label} — lasts until your next long rest.`});
+  }
+  return { events };
+}
+
 /* ---- Floor / run advancement ---- */
 export function advanceAfterRoom(run, ch){
   if(run.status !== "active") return run.status;
