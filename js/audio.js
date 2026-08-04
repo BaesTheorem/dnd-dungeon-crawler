@@ -140,8 +140,19 @@ export function audioDebug(){
   };
 }
 
-/* ---- generative music ----
-   Slow minor-key pad: scheduled chord drones + occasional low pulse. Modes shift the root/tempo. */
+/* ---- music ----
+   Real tracks (Kevin MacLeod, incompetech.com, CC-BY 4.0 — credited in README + Settings), looped
+   and routed through musicGain via MediaElementSource so the volume/mute prefs still apply.
+   The old generative pad remains as a fallback when a track can't load (e.g. offline before
+   it was ever cached). */
+const MUSIC_FILES = {
+  town:    "./audio/town.mp3",      // Master of the Feast
+  dungeon: "./audio/dungeon.mp3",   // Ossuary 5 - Rest
+  combat:  "./audio/combat.mp3",    // Crossing the Chasm
+  boss:    "./audio/boss.mp3",      // Five Armies
+};
+const _trackEls = {};               // mode -> {el, node}
+
 const MODES = {
   dungeon: { root: 110.00, chords: [[0,3,7],[0,5,8],[-2,3,7],[0,3,10]], step: 4.0, pulse: 0.10 },
   combat:  { root: 130.81, chords: [[0,3,7],[-2,2,7],[1,4,8],[0,3,7]],  step: 2.2, pulse: 0.35 },
@@ -181,6 +192,29 @@ function ensureMusic(){ if(_wantMusic && !_music) startMusic(_wantMusic); }
 export function startMusic(mode){
   _wantMusic = mode;
   if(!ctx || !prefs.music) return;
+  if(_music && _music.mode === mode) return;
+  stopMusicNow();
+  const file = MUSIC_FILES[mode];
+  if(file){
+    let rec = _trackEls[mode];
+    if(!rec){
+      const el = new Audio(file);
+      el.loop = true;
+      el.preload = "auto";
+      el.setAttribute("playsinline", "");
+      let node = null;
+      try{ node = ctx.createMediaElementSource(el); node.connect(musicGain); }catch(e){}
+      rec = _trackEls[mode] = { el, node };
+      el.addEventListener("error", () => { if(_wantMusic === mode && _music && _music.kind === "track") startGenMusic(mode); });
+    }
+    _music = { mode, kind:"track" };
+    rec.el.play().catch(() => { if(_wantMusic === mode) startGenMusic(mode); });
+    return;
+  }
+  startGenMusic(mode);
+}
+
+function startGenMusic(mode){
   stopMusicNow();
   const m = MODES[mode] || MODES.dungeon;
   let chord = 0;
@@ -193,8 +227,13 @@ export function startMusic(mode){
     }
   }, 500);
   scheduleChord(mode, nextAt, chord++); nextAt += m.step;
-  _music = { mode, timer };
+  _music = { mode, kind:"gen", timer };
 }
-function stopMusicNow(){ if(_music){ clearInterval(_music.timer); _music = null; } }
+function stopMusicNow(){
+  if(!_music) return;
+  if(_music.kind === "gen") clearInterval(_music.timer);
+  else { const rec = _trackEls[_music.mode]; if(rec) rec.el.pause(); }
+  _music = null;
+}
 export function stopMusic(){ _wantMusic = null; stopMusicNow(); }
 export function musicMode(){ return _music ? _music.mode : null; }

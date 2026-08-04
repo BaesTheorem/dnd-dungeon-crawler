@@ -40,6 +40,16 @@ async function boot(){
   }
   bindSheet(() => currentCombat());
   window.__audioDebug = audioDebug;                     // console/diagnostic hook
+  // Save-and-exit from anywhere in the game (mid-combat included — the fight resumes on return).
+  const exitBtn = $("game-exit");
+  exitBtn.append(icon("arrowUp", 16));
+  exitBtn.addEventListener("click", () => {
+    saveNow();
+    teardownCombatUI();
+    renderRoster();
+    showScreen("screen-roster");
+    startMusic("town");
+  });
   window.addEventListener("render-roster", renderRoster);
   renderRoster();
   showScreen("screen-roster");
@@ -137,7 +147,8 @@ function settingsCard(){
       }, 350);
     }}, icon("volume", 16), "Test sound"),
     h("p", {class:"muted", id:"audio-test-note"}, ""),
-    h("p", {class:"muted"}, `v${VERSION} · offline-ready · your heroes live in this device's browser storage`));
+    h("p", {class:"muted"}, `v${VERSION} · offline-ready · your heroes live in this device's browser storage`),
+    h("p", {class:"muted", style:"font-size:12px"}, `Music: "Master of the Feast", "Ossuary 5 - Rest", "Crossing the Chasm", "Five Armies" — Kevin MacLeod (incompetech.com), CC BY 4.0`));
 }
 
 function onCharacterBuilt(ch){

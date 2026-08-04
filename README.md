@@ -29,7 +29,10 @@ conditions kernel, storage layer, and 5e dataset it reuses.
   fighting styles, Second Wind / Action Surge / Channel Divinity, spell slots with upcasting,
   concentration checks, and death saves.
 - **XP and level-ups** between rooms: HP (average or roll), ASIs, subclasses, new spells.
-- **Music & SFX** — procedurally synthesized with the Web Audio API; no audio files.
+- **Music & SFX** — real soundtrack per mode (menu / dungeon / combat / boss) with sound
+  effects synthesized by the Web Audio API. Music by Kevin MacLeod (incompetech.com),
+  licensed under [Creative Commons: By Attribution 4.0](https://creativecommons.org/licenses/by/4.0/):
+  "Master of the Feast", "Ossuary 5 - Rest", "Crossing the Chasm", "Five Armies".
 
 ### House rules (deliberate, for solo play)
 

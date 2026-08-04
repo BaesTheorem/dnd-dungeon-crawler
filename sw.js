@@ -6,7 +6,7 @@
      served cache-first — a version-coherent set of ES modules, no old-module/new-shell skew offline.
    - activate deletes every cache except the current one.
    CACHE is stamped by .githooks/pre-commit on every commit. */
-const CACHE = "dnd-crawler-v1.0.6";
+const CACHE = "dnd-crawler-v1.0.7";
 const DOC = "./index.html";
 const ASSETS = [
   "./",
@@ -17,6 +17,8 @@ const ASSETS = [
   "./js/sheet.js", "./js/combat.js", "./js/combat-ui.js", "./js/dungeon.js", "./js/audio.js",
   "./data/data.js", "./data/tables.js", "./data/source-data.json",
   "./manifest.webmanifest", "./icon-180.png", "./icon-512.png", "./icon-512-maskable.png",
+  // Music (audio/*.mp3) is deliberately NOT precached — ~26 MB total. The fetch handler's
+  // cacheFirst picks each track up the first time it plays, so it still works offline afterwards.
 ];
 
 self.addEventListener("install", e => {
