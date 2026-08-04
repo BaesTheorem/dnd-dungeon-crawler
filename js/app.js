@@ -239,6 +239,8 @@ function renderCorridor(){
       nextIsLast ? (run.floor >= FLOORS ? "Enter the boss lair" : "Approach the stairs") : "Open the next door"));
     const castable = D.castableOutOfCombat(ch);
     if(castable.length) bar.append(h("button", {class:"btn", onclick: castBar}, icon("sparkle"), "Cast a spell"));
+    bar.append(h("button", {class:"btn", onclick: campRest}, icon("fire"),
+      `Make camp — short rest (${ch.familiar && ch.familiar.alive ? "risky" : "very risky"})`));
     bar.append(h("button", {class:"btn", onclick: () => openSheet(ch)}, icon("scroll"), "Character sheet"));
     bar.append(h("button", {class:"btn", onclick: () => { saveNow(); renderRoster(); showScreen("screen-roster"); }}, icon("arrowUp"), "Retreat to the surface"));
     bar.append(h("button", {class:"btn", onclick: () => {
@@ -247,6 +249,22 @@ function renderCorridor(){
         restartRun(ch);
       }
     }}, icon("restart"), "Abandon run — start over"));
+  };
+  const campRest = () => {
+    const spend = Math.min(2, ch.hp.hitDiceCur);
+    const r = D.shortRest(S.run, ch, spend, { risky:true });
+    r.events.forEach(e => { if(e.t === "sfx") sfx(e.name); });
+    queueSave();
+    if(r.ambush){
+      S.run.room = { type:"combat", floor:S.run.floor, index:S.run.roomIndex, resolved:false,
+        flavor:"Torchlight, half-cooked food, and no walls at your back — they found your camp." };
+      renderEvents(logEl(), r.events);
+      const st = ambushCombat(S.run, ch);
+      startCombatUI(st, ch, S.run.floor, onCombatEnd);
+      return;
+    }
+    renderCorridor();
+    renderEvents(logEl(), r.events);
   };
   const castBar = () => {
     clear(bar);

@@ -256,10 +256,12 @@ export function openChest(run, ch){
 }
 
 /* ---- Rest ---- */
-export function shortRest(run, ch, diceToSpend){
+export function shortRest(run, ch, diceToSpend, { risky = false } = {}){
   const events = [];
-  if(Math.random() < (familiarAlive(ch) ? 0.05 : 0.15)){  // the owl keeps watch
-    events.push({t:"log", text:"Something found you while you rested!"});
+  // Rest sites are defensible; camping in a corridor is not — double the ambush odds there.
+  const ambushChance = risky ? (familiarAlive(ch) ? 0.15 : 0.30) : (familiarAlive(ch) ? 0.05 : 0.15);
+  if(Math.random() < ambushChance){
+    events.push({t:"log", text: risky ? "Your corridor camp was too exposed — something found you!" : "Something found you while you rested!"});
     return { events, ambush:true };
   }
   const cls = C.charClass(ch); const hd = (cls && cls.hd) || 8;
@@ -284,7 +286,7 @@ export function shortRest(run, ch, diceToSpend){
     events.push({t:"log", text:"Arcane Recovery restores some spell slots."});
   }
   events.push({t:"sfx", name:"heal"}, {t:"log", text:`Short rest: ${n} Hit ${n===1?"Die":"Dice"} spent, +${healed} HP (${ch.hp.cur}/${ch.hp.max}).`});
-  run.room.resolved = true;
+  if(run.room) run.room.resolved = true;                  // corridor camps have no room to resolve
   return { events, healed };
 }
 export function longRestHere(run, ch){

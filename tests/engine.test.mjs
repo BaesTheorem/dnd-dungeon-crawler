@@ -606,6 +606,20 @@ test("generic utility fallback: no castable spell is a dead button", () => {
   assert.ok(ch.hp.temp >= 2, "and a ward");
 });
 
+test("corridor camp: risky short rest works with no room, ambushes more often", () => {
+  let sawAmbush = false, sawRest = false;
+  for(let i = 0; i < 200 && !(sawAmbush && sawRest); i++){
+    const ch = makeFighter();
+    for(let l = 2; l <= 3; l++) C.applyLevelUp(ch);
+    ch.hp.cur = 1;
+    const run = newRun(ch);                                // corridor: run.room is null
+    const r = shortRest(run, ch, 2, { risky:true });
+    if(r.ambush) sawAmbush = true;
+    else { sawRest = true; assert.ok(ch.hp.cur > 1, "healed"); }
+  }
+  assert.ok(sawAmbush && sawRest, "both outcomes occur at corridor odds");
+});
+
 test("short rest spends hit dice and heals", () => {
   const ch = makeFighter();
   for(let l = 2; l <= 3; l++) C.applyLevelUp(ch);
