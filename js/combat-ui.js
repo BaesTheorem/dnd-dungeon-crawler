@@ -74,6 +74,18 @@ export function render(){
     targetIdx = st.monsters.findIndex(m => m.hp > 0);
 
   area.append(h("p", {class:"floorpip center"}, `Round ${st.round} — ${st.phase === "player" ? "your turn" : st.phase === "monster" ? "enemy turn" : st.phase}`));
+
+  // Your side always leads the screen, whatever the initiative order.
+  area.append(h("div", {class:"card", style:"margin-bottom:10px"},
+    h("div", {class:"charcard"},
+      h("div", {class:"info"},
+        h("div", {class:"nm"}, ch.name),
+        hpBarEl(ch.hp.cur, ch.hp.max),
+        h("div", {class:"meta"}, `${ch.hp.cur}/${ch.hp.max} HP${ch.hp.temp ? ` +${ch.hp.temp}` : ""} · AC ${C.armorClass(ch, st.playerBuffs)}${ch.conditions.length ? " · " + ch.conditions.join(", ") : ""}${st.playerBuffs.length ? " · " + st.playerBuffs.map(b => b.label.split(" (")[0]).join(", ") : ""}`),
+        ch.familiar && ch.familiar.alive
+          ? h("div", {class:"meta", style:"color:var(--accent)"}, `${ch.familiar.form} familiar — Help ${st.helpUsed ? "used this round" : "ready"}`)
+          : null))));
+
   st.monsters.forEach((m, i) => {
     area.append(h("div", {class:"enemy" + (m.hp <= 0 ? " dead" : i === targetIdx ? " target" : ""),
       onclick: () => { if(m.hp > 0){ targetIdx = i; sfx("ui-tap"); render(); } }},
@@ -82,14 +94,6 @@ export function render(){
         h("div", {class:"meta"}, `AC ${m.ac} · CR ${m.cr}${m.conditions.length ? " · " + m.conditions.map(c => c.k).join(", ") : ""}`)),
       h("div", {class:"ebar"}, hpBarEl(m.hp, m.maxHP), h("div", {class:"meta center"}, `${m.hp}/${m.maxHP}`))));
   });
-
-  // Player status strip
-  area.append(h("div", {class:"card", style:"margin-top:10px"},
-    h("div", {class:"charcard"},
-      h("div", {class:"info"},
-        h("div", {class:"nm"}, ch.name),
-        hpBarEl(ch.hp.cur, ch.hp.max),
-        h("div", {class:"meta"}, `${ch.hp.cur}/${ch.hp.max} HP${ch.hp.temp ? ` +${ch.hp.temp}` : ""} · AC ${C.armorClass(ch, st.playerBuffs)}${ch.conditions.length ? " · " + ch.conditions.join(", ") : ""}${st.playerBuffs.length ? " · " + st.playerBuffs.map(b => b.label.split(" (")[0]).join(", ") : ""}`)))));
 
   area.append(h("div", {class:"log", id:"combat-log-holder"}, logEl()));
   renderBar();
